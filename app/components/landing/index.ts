@@ -1,0 +1,11 @@
+export { default as Navbar } from "./Navbar";
+export { default as Hero } from "./Hero";
+export { default as Explore } from "./Explore";
+export { default as Categories } from "./Categories";
+export { default as Instructors } from "./Instructors";
+export { default as FAQ } from "./FAQ";
+export { default as About } from "./About";
+export { default as Process } from "./Process";
+export { default as Contact } from "./Contact";
+export { default as GetInTouch } from "./GetInTouch";
+export { default as Footer } from "./Footer";
