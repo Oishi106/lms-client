@@ -1,40 +1,103 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useMemo } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { COURSES } from '@/app/lib/courses-data';
 import Navbar from '@/app/components/landing/Navbar';
 import Footer from '@/app/components/landing/Footer';
+import { CATEGORIES_STORAGE_KEY, DEFAULT_CATEGORIES, type CategoryItem } from '@/app/lib/categories-data';
 
-type CategoryTag = 'AI & ML' | 'Development' | 'Design' | 'Data Science' | 'Cloud & DevOps' | 'Cybersecurity' | 'Mobile Dev' | 'Business';
+type CourseTag = (typeof COURSES)[number]['tag'];
 
 interface Category {
-  tag: CategoryTag;
+  id: string;
+  tag: string;
   label: string;
   icon: string;
   description: string;
 }
 
-const CATEGORIES: Category[] = [
-  { tag: 'AI & ML', label: 'AI & Machine Learning', icon: '🤖', description: 'Master AI and machine learning with hands-on projects' },
-  { tag: 'Development', label: 'Web Development', icon: '💻', description: 'Learn front-end and back-end web development' },
-  { tag: 'Design', label: 'UI/UX Design', icon: '🎨', description: 'Create beautiful and user-friendly digital experiences' },
-  { tag: 'Data Science', label: 'Data Science & Analytics', icon: '📊', description: 'Analyze data and extract actionable insights' },
-  { tag: 'Cloud & DevOps', label: 'Cloud & DevOps', icon: '☁️', description: 'Deploy and manage applications in the cloud' },
-  { tag: 'Cybersecurity', label: 'Cybersecurity', icon: '🔒', description: 'Protect systems and networks from threats' },
-  { tag: 'Mobile Dev', label: 'Mobile Development', icon: '📱', description: 'Build iOS and Android applications' },
-  { tag: 'Business', label: 'Business', icon: '💼', description: 'Develop business and leadership skills' },
-];
+const DEFAULT_CATEGORIES_SNAPSHOT = JSON.stringify(DEFAULT_CATEGORIES);
+
+const CATEGORY_META: Record<string, { tag: CourseTag; description: string }> = {
+  'AI & Machine Learning': { tag: 'AI & ML', description: 'Master AI and machine learning with hands-on projects' },
+  'Web Development': { tag: 'Development', description: 'Learn front-end and back-end web development' },
+  'UI/UX Design': { tag: 'Design', description: 'Create beautiful and user-friendly digital experiences' },
+  'Data & Analytics': { tag: 'Data Science', description: 'Analyze data and extract actionable insights' },
+  'Cloud & DevOps': { tag: 'Cloud & DevOps', description: 'Deploy and manage applications in the cloud' },
+  'Cyber Security': { tag: 'Cybersecurity', description: 'Protect systems and networks from threats' },
+  'Mobile Development': { tag: 'Mobile Dev', description: 'Build iOS and Android applications' },
+  Business: { tag: 'Business', description: 'Develop business and leadership skills' },
+};
+
+const normalizeCategories = (items: CategoryItem[]): CategoryItem[] => {
+  if (!Array.isArray(items) || items.length === 0) return DEFAULT_CATEGORIES;
+  const normalized = items
+    .map((item, index) => ({
+      id: item.id?.trim() || `category-${index + 1}`,
+      label: item.label?.trim() || '',
+      icon: item.icon?.trim() || '📚',
+      pill: item.pill,
+    }))
+    .filter((item) => item.label);
+  return normalized.length > 0 ? normalized : DEFAULT_CATEGORIES;
+};
+
+const getClientSnapshot = (): string => {
+  const storedCategories = window.localStorage.getItem(CATEGORIES_STORAGE_KEY);
+  if (!storedCategories) return DEFAULT_CATEGORIES_SNAPSHOT;
+  try {
+    return JSON.stringify(normalizeCategories(JSON.parse(storedCategories) as CategoryItem[]));
+  } catch {
+    return DEFAULT_CATEGORIES_SNAPSHOT;
+  }
+};
+
+const subscribeCategories = (callback: () => void) => {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === CATEGORIES_STORAGE_KEY) callback();
+  };
+  const onLocalUpdate = () => callback();
+
+  window.addEventListener('storage', onStorage);
+  window.addEventListener('skillforge-categories-updated', onLocalUpdate);
+
+  return () => {
+    window.removeEventListener('storage', onStorage);
+    window.removeEventListener('skillforge-categories-updated', onLocalUpdate);
+  };
+};
 
 export default function CategoriesPage() {
-  const [selectedCategory, setSelectedCategory] = useState<CategoryTag | null>(null);
+  const categoriesSnapshot = useSyncExternalStore(subscribeCategories, getClientSnapshot, () => DEFAULT_CATEGORIES_SNAPSHOT);
+  const baseCategories = useMemo(() => JSON.parse(categoriesSnapshot) as CategoryItem[], [categoriesSnapshot]);
+
+  const categories = useMemo<Category[]>(() => {
+    return baseCategories.map((category) => {
+      const meta = CATEGORY_META[category.label] ?? {
+        tag: 'Development' as CourseTag,
+        description: 'Explore curated courses in this category.',
+      };
+      return {
+        id: category.id,
+        label: category.label,
+        icon: category.icon,
+        tag: meta.tag,
+        description: meta.description,
+      };
+    });
+  }, [baseCategories]);
+
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   const filteredCourses = useMemo(() => {
-    if (!selectedCategory) return COURSES;
-    return COURSES.filter((course) => course.tag === selectedCategory);
-  }, [selectedCategory]);
+    if (!selectedCategoryId) return COURSES;
+    const selectedCategory = categories.find((category) => category.id === selectedCategoryId);
+    if (!selectedCategory) return [];
+    return COURSES.filter((course) => course.tag === selectedCategory.tag);
+  }, [selectedCategoryId, categories]);
 
-  const selectedCategoryData = CATEGORIES.find((c) => c.tag === selectedCategory);
+  const selectedCategoryData = categories.find((category) => category.id === selectedCategoryId);
 
   return (
     <div>
@@ -92,14 +155,14 @@ export default function CategoriesPage() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: selectedCategory ? '300px 1fr' : '1fr',
+              gridTemplateColumns: selectedCategoryId ? '300px 1fr' : '1fr',
               gap: '40px',
               transition: 'grid-template-columns 0.3s ease',
             }}
           >
             {/* Categories Grid */}
             <div>
-              {selectedCategory && (
+              {selectedCategoryId && (
                 <h2
                   style={{
                     fontSize: '18px',
@@ -114,25 +177,25 @@ export default function CategoriesPage() {
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: selectedCategory ? '1fr' : 'repeat(auto-fill, minmax(200px, 1fr))',
+                  gridTemplateColumns: selectedCategoryId ? '1fr' : 'repeat(auto-fill, minmax(200px, 1fr))',
                   gap: '16px',
                   transition: 'grid-template-columns 0.3s ease',
                 }}
               >
-                {CATEGORIES.map((category) => (
+                {categories.map((category) => (
                   <div
-                    key={category.tag}
+                    key={category.id}
                     onClick={() =>
-                      setSelectedCategory(selectedCategory === category.tag ? null : category.tag)
+                      setSelectedCategoryId(selectedCategoryId === category.id ? null : category.id)
                     }
                     style={{
                       cursor: 'pointer',
-                      border: selectedCategory === category.tag ? '2px solid var(--gold)' : '2px solid var(--border-default)',
+                      border: selectedCategoryId === category.id ? '2px solid var(--gold)' : '2px solid var(--border-default)',
                       borderRadius: '16px',
                       padding: '24px 20px',
                       textAlign: 'center',
                       transition: 'all 0.3s ease',
-                      background: selectedCategory === category.tag ? 'rgba(251, 146, 60, 0.05)' : 'var(--bg-surface)',
+                      background: selectedCategoryId === category.id ? 'rgba(251, 146, 60, 0.05)' : 'var(--bg-surface)',
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.transform = 'translateY(-8px)';
@@ -152,7 +215,7 @@ export default function CategoriesPage() {
                     <div style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
                       {category.description}
                     </div>
-                    {selectedCategory === category.tag && (
+                    {selectedCategoryId === category.id && (
                       <div style={{ display: 'inline-block', marginTop: '12px', fontSize: '12px', background: 'rgba(251, 146, 60, 0.1)', color: 'var(--gold)', padding: '6px 12px', borderRadius: '20px', fontWeight: '600' }}>
                         {filteredCourses.length} courses
                       </div>
@@ -164,7 +227,7 @@ export default function CategoriesPage() {
 
             {/* Courses Section */}
             <div>
-              {selectedCategory && (
+              {selectedCategoryId && (
                 <div>
                   <div
                     style={{
@@ -190,7 +253,7 @@ export default function CategoriesPage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => setSelectedCategory(null)}
+                      onClick={() => setSelectedCategoryId(null)}
                       style={{
                         background: 'transparent',
                         border: '1px solid var(--border-default)',
@@ -296,7 +359,7 @@ export default function CategoriesPage() {
                 </div>
               )}
 
-              {!selectedCategory && (
+              {!selectedCategoryId && (
                 <div
                   style={{
                     textAlign: 'center',

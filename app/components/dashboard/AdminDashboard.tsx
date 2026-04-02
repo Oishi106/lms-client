@@ -3,24 +3,80 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/app/providers';
+import { DEFAULT_FAQS, FAQ_STORAGE_KEY, type FaqItem } from '@/app/lib/faq-data';
+import { DEFAULT_HERO_IMAGE_URL, HERO_IMAGE_STORAGE_KEY } from '@/app/lib/hero-data';
+import { CATEGORIES_STORAGE_KEY, DEFAULT_CATEGORIES, type CategoryItem } from '@/app/lib/categories-data';
+import { getInitialUserAdminChat, saveUserAdminChat, subscribeUserAdminChat, type UserAdminChatMessage } from '@/app/lib/user-admin-chat';
 
 type AdminPanel = 'overview' | 'users' | 'invoices' | 'create-course' | 'live-courses' | 'hero' | 'faq' | 'categories' | 'manage-team' | 'courses-analytics' | 'ai-chat';
 
-interface AnalyticsData {
-  users: number;
-  courses: number;
-  revenue: number;
-  growth: number;
-}
+const blankFaq = (): FaqItem => ({ q: '', a: '' });
+const blankCategory = (): CategoryItem => ({ id: `category-${Date.now()}`, label: '', icon: '📚', pill: 'pill-gold' });
+
+const getInitialCategories = (): CategoryItem[] => {
+  if (typeof window === 'undefined') return DEFAULT_CATEGORIES;
+
+  const storedCategories = window.localStorage.getItem(CATEGORIES_STORAGE_KEY);
+  if (!storedCategories) return DEFAULT_CATEGORIES;
+
+  try {
+    const parsed = JSON.parse(storedCategories) as CategoryItem[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_CATEGORIES;
+
+    const normalized = parsed
+      .map((item, index) => ({
+        id: item.id?.trim() || `category-${index + 1}`,
+        label: item.label?.trim() || '',
+        icon: item.icon?.trim() || '📚',
+        pill: item.pill,
+      }))
+      .filter((item) => item.label)
+      .map((item) => ({
+        ...item,
+        pill: ['pill-gold', 'pill-teal', 'pill-violet', 'pill-rose'].includes(item.pill)
+          ? item.pill
+          : 'pill-gold',
+      }));
+
+    return normalized.length > 0 ? normalized : DEFAULT_CATEGORIES;
+  } catch {
+    return DEFAULT_CATEGORIES;
+  }
+};
+
+const getInitialHeroImage = (): string => {
+  if (typeof window === 'undefined') return DEFAULT_HERO_IMAGE_URL;
+  return window.localStorage.getItem(HERO_IMAGE_STORAGE_KEY)?.trim() || DEFAULT_HERO_IMAGE_URL;
+};
+
+const getInitialFaqItems = (): FaqItem[] => {
+  if (typeof window === 'undefined') return DEFAULT_FAQS;
+
+  const storedFaqs = window.localStorage.getItem(FAQ_STORAGE_KEY);
+  if (!storedFaqs) return DEFAULT_FAQS;
+
+  try {
+    const parsed = JSON.parse(storedFaqs) as FaqItem[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_FAQS;
+    const normalizedFaqs = parsed.filter((item) => item.q?.trim() && item.a?.trim());
+    return normalizedFaqs.length > 0 ? normalizedFaqs : DEFAULT_FAQS;
+  } catch {
+    return DEFAULT_FAQS;
+  }
+};
 
 export default function AdminDashboard() {
   const router = useRouter();
   const { user } = useAuth();
   const [activePanel, setActivePanel] = useState<AdminPanel>('overview');
-  const [chatMsgs, setChatMsgs] = useState<{ from: 'user' | 'ai'; text: string }[]>([
-    { from: 'ai', text: 'Hello! I\'m your AI Assistant. I can help you analyze dashboard metrics, user data, and provide insights. What would you like to know?' }
-  ]);
+  const [chatMsgs, setChatMsgs] = useState<UserAdminChatMessage[]>(getInitialUserAdminChat);
   const [chatInput, setChatInput] = useState('');
+  const [faqItems, setFaqItems] = useState<FaqItem[]>(getInitialFaqItems);
+  const [faqStatus, setFaqStatus] = useState('');
+  const [heroImageInput, setHeroImageInput] = useState(getInitialHeroImage);
+  const [heroStatus, setHeroStatus] = useState('');
+  const [categoriesItems, setCategoriesItems] = useState<CategoryItem[]>(getInitialCategories);
+  const [categoriesStatus, setCategoriesStatus] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,26 +87,125 @@ export default function AdminDashboard() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMsgs]);
 
+  useEffect(() => subscribeUserAdminChat(() => setChatMsgs(getInitialUserAdminChat())), []);
+
   const handleSendMessage = () => {
-    if (!chatInput.trim()) return;
+    const msg = chatInput.trim();
+    if (!msg || !user) return;
 
-    setChatMsgs(prev => [...prev, { from: 'user', text: chatInput }]);
+    const nextMessage: UserAdminChatMessage = {
+      id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      senderRole: 'admin',
+      senderName: user.name,
+      text: msg,
+      createdAt: Date.now(),
+    };
 
-    // AI responses based on keywords
-    let aiResponse = 'Based on your question, let me analyze the current metrics...';
-    if (chatInput.toLowerCase().includes('user')) {
-      aiResponse = 'Currently, you have 4,832 active users with a 42% growth this month. Peak activity is between 2-5 PM UTC.';
-    } else if (chatInput.toLowerCase().includes('revenue')) {
-      aiResponse = '$45,234 revenue generated this month, up 28% from last month. Top performing course: ML Bootcamp 2025.';
-    } else if (chatInput.toLowerCase().includes('course')) {
-      aiResponse = 'You have 1,247 active courses. The most popular are: 1) ML Bootcamp 2025 2) React Masterclass 3) UI/UX Design Bootcamp.';
+    const updated = saveUserAdminChat([...chatMsgs, nextMessage]);
+    setChatMsgs(updated);
+    setChatInput('');
+  };
+
+  const updateFaqItem = (index: number, field: keyof FaqItem, value: string) => {
+    setFaqItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+    if (faqStatus) setFaqStatus('');
+  };
+
+  const addFaqItem = () => {
+    setFaqItems((prev) => [...prev, blankFaq()]);
+    if (faqStatus) setFaqStatus('');
+  };
+
+  const removeFaqItem = (index: number) => {
+    setFaqItems((prev) => prev.filter((_, i) => i !== index));
+    if (faqStatus) setFaqStatus('');
+  };
+
+  const saveFaqItems = () => {
+    const normalizedFaqs = faqItems
+      .map((item) => ({ q: item.q.trim(), a: item.a.trim() }))
+      .filter((item) => item.q && item.a);
+
+    if (normalizedFaqs.length === 0) {
+      setFaqStatus('At least one FAQ question and answer is required.');
+      return;
     }
 
-    setTimeout(() => {
-      setChatMsgs(prev => [...prev, { from: 'ai', text: aiResponse }]);
-    }, 500);
+    window.localStorage.setItem(FAQ_STORAGE_KEY, JSON.stringify(normalizedFaqs));
+    window.dispatchEvent(new Event('skillforge-faq-updated'));
+    setFaqItems(normalizedFaqs);
+    setFaqStatus('Homepage FAQ updated successfully.');
+  };
 
-    setChatInput('');
+  const resetFaqItems = () => {
+    window.localStorage.removeItem(FAQ_STORAGE_KEY);
+    window.dispatchEvent(new Event('skillforge-faq-updated'));
+    setFaqItems(DEFAULT_FAQS);
+    setFaqStatus('FAQ reset to default content.');
+  };
+
+  const saveHeroImage = () => {
+    const normalizedUrl = heroImageInput.trim();
+    window.localStorage.setItem(HERO_IMAGE_STORAGE_KEY, normalizedUrl);
+    window.dispatchEvent(new Event('skillforge-hero-updated'));
+    setHeroImageInput(normalizedUrl);
+    setHeroStatus('Homepage hero image updated successfully.');
+  };
+
+  const resetHeroImage = () => {
+    window.localStorage.removeItem(HERO_IMAGE_STORAGE_KEY);
+    window.dispatchEvent(new Event('skillforge-hero-updated'));
+    setHeroImageInput(DEFAULT_HERO_IMAGE_URL);
+    setHeroStatus('Hero image reset to default.');
+  };
+
+  const updateCategoryItem = (index: number, field: keyof CategoryItem, value: string) => {
+    setCategoriesItems((prev) => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)));
+    if (categoriesStatus) setCategoriesStatus('');
+  };
+
+  const addCategoryItem = () => {
+    setCategoriesItems((prev) => [...prev, blankCategory()]);
+    if (categoriesStatus) setCategoriesStatus('');
+  };
+
+  const removeCategoryItem = (index: number) => {
+    setCategoriesItems((prev) => prev.filter((_, i) => i !== index));
+    if (categoriesStatus) setCategoriesStatus('');
+  };
+
+  const saveCategoriesItems = () => {
+    const normalizedCategories = categoriesItems
+      .map((item, index) => ({
+        id: item.id?.trim() || `category-${index + 1}`,
+        label: item.label.trim(),
+        icon: item.icon.trim() || '📚',
+        pill: item.pill,
+      }))
+      .filter((item) => item.label)
+      .map((item) => ({
+        ...item,
+        pill: ['pill-gold', 'pill-teal', 'pill-violet', 'pill-rose'].includes(item.pill)
+          ? item.pill
+          : 'pill-gold',
+      }));
+
+    if (normalizedCategories.length === 0) {
+      setCategoriesStatus('At least one category label is required.');
+      return;
+    }
+
+    window.localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(normalizedCategories));
+    window.dispatchEvent(new Event('skillforge-categories-updated'));
+    setCategoriesItems(normalizedCategories);
+    setCategoriesStatus('Homepage categories updated successfully.');
+  };
+
+  const resetCategoriesItems = () => {
+    window.localStorage.removeItem(CATEGORIES_STORAGE_KEY);
+    window.dispatchEvent(new Event('skillforge-categories-updated'));
+    setCategoriesItems(DEFAULT_CATEGORIES);
+    setCategoriesStatus('Categories reset to default content.');
   };
 
   if (!user || user.role !== 'admin') return null;
@@ -58,11 +213,12 @@ export default function AdminDashboard() {
   return (
     <div style={{ display: 'flex', height: 'calc(100vh - 68px)', marginTop: '68px', background: 'var(--bg-primary)', overflow: 'hidden' }}>
       {/* Sidebar */}
-      <div style={{ width: '220px', background: 'var(--bg-surface)', borderRight: '1px solid var(--border-default)', padding: '0', overflowY: 'auto', color: 'var(--text-secondary)', maxHeight: 'calc(100vh - 68px)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ width: '240px', padding: '20px 14px 20px 20px', color: 'var(--text-secondary)', maxHeight: 'calc(100vh - 68px)' }}>
+        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '16px', overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* Premium Header */}
-        <div style={{ background: `linear-gradient(135deg, rgba(46, 232, 207, 0.08) 0%, rgba(251, 146, 60, 0.04) 100%)`, borderBottom: '2px solid var(--border-default)', padding: '24px 20px', marginBottom: '0', position: 'relative' }}>
+        <div style={{ padding: '20px 20px 18px', marginBottom: '0', position: 'relative', borderBottom: '1px solid var(--border-default)' }}>
           {/* Header Title */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
             <div style={{ fontSize: '10px', fontWeight: '900', color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: '0.15em', fontFamily: 'var(--font-display)' }}>ELEARNING</div>
             <button
               style={{
@@ -100,21 +256,21 @@ export default function AdminDashboard() {
                 boxShadow: '0 8px 24px rgba(251, 146, 60, 0.15)',
               }}
             >
-              <div
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  borderRadius: '50%',
-                  background: 'var(--bg-surface)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '36px',
-                  fontWeight: '700',
-                  color: 'var(--gold)',
-                  fontFamily: 'var(--font-display)',
-                }}
-              >
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: '50%',
+                    background: 'var(--bg-card-alt)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '36px',
+                    fontWeight: '700',
+                    color: 'var(--gold)',
+                    fontFamily: 'var(--font-display)',
+                  }}
+                >
                 {user?.initials?.[0] || 'A'}
               </div>
             </div>
@@ -254,9 +410,10 @@ export default function AdminDashboard() {
                 transition: 'all 0.2s ease',
               }}
             >
-              {panel === 'courses-analytics' && '📊'} {panel === 'ai-chat' && '🤖'} {panel === 'courses-analytics' ? 'Courses Analytics' : 'AI Assistant'}
+              {panel === 'courses-analytics' && '📊'} {panel === 'ai-chat' && '💬'} {panel === 'courses-analytics' ? 'Courses Analytics' : 'User Chat'}
             </div>
           ))}
+        </div>
         </div>
         </div>
       </div>
@@ -412,7 +569,7 @@ export default function AdminDashboard() {
         {activePanel === 'ai-chat' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', maxWidth: '600px' }}>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '20px' }}>
-              AI Assistant
+              User Support Chat
             </h1>
             <div
               style={{
@@ -425,13 +582,13 @@ export default function AdminDashboard() {
                 marginBottom: '16px',
               }}
             >
-              {chatMsgs.map((msg, i) => (
+              {chatMsgs.map((msg) => (
                 <div
-                  key={i}
+                  key={msg.id}
                   style={{
                     marginBottom: '16px',
                     display: 'flex',
-                    justifyContent: msg.from === 'user' ? 'flex-end' : 'flex-start',
+                    justifyContent: msg.senderRole === 'admin' ? 'flex-end' : 'flex-start',
                   }}
                 >
                   <div
@@ -439,12 +596,16 @@ export default function AdminDashboard() {
                       maxWidth: '80%',
                       padding: '12px 16px',
                       borderRadius: '12px',
-                      background: msg.from === 'user' ? 'var(--gold)' : 'var(--border-default)',
-                      color: msg.from === 'user' ? 'var(--text-inverse)' : 'var(--text-primary)',
+                      background: msg.senderRole === 'admin' ? 'var(--gold)' : 'var(--bg-card-alt)',
+                      color: msg.senderRole === 'admin' ? 'var(--text-inverse)' : 'var(--text-primary)',
                       fontSize: '14px',
                       lineHeight: '1.5',
+                      border: msg.senderRole === 'admin' ? 'none' : '1px solid var(--border-default)',
                     }}
                   >
+                    <div style={{ fontSize: '11px', fontWeight: 700, opacity: 0.85, marginBottom: '4px' }}>
+                      {msg.senderRole === 'admin' ? 'You (Admin)' : msg.senderName}
+                    </div>
                     {msg.text}
                   </div>
                 </div>
@@ -458,8 +619,8 @@ export default function AdminDashboard() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder="Ask me anything about your dashboard..."
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSendMessage(); }}
+                placeholder="Reply to user message..."
                 style={{
                   flex: 1,
                   padding: '12px 16px',
@@ -526,8 +687,83 @@ export default function AdminDashboard() {
         {activePanel === 'hero' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>Hero Section</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>Hero section customization coming soon</p>
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: '16px' }}>Update the right-side image of the homepage hero card using an image URL.</p>
+
+              <label style={{ display: 'block', fontSize: '13px', marginBottom: '8px', color: 'var(--text-primary)', fontWeight: '600' }}>Hero Image URL</label>
+              <input
+                type="text"
+                value={heroImageInput}
+                onChange={(e) => {
+                  setHeroImageInput(e.target.value);
+                  if (heroStatus) setHeroStatus('');
+                }}
+                placeholder="https://example.com/hero-image.jpg"
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-default)',
+                  background: 'var(--bg-card-alt)',
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                  marginBottom: '12px',
+                }}
+              />
+
+              <div style={{ border: '1px solid var(--border-default)', borderRadius: '10px', overflow: 'hidden', height: '180px', marginBottom: '14px', background: 'var(--bg-card-alt)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {heroImageInput.trim() ? (
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      backgroundImage: `url(${heroImageInput.trim()})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      backgroundRepeat: 'no-repeat',
+                    }}
+                  />
+                ) : (
+                  <span style={{ fontSize: '48px' }}>🤖</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={saveHeroImage}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'var(--gold)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: 'var(--text-inverse)',
+                    cursor: 'pointer',
+                    fontWeight: '700',
+                  }}
+                >
+                  Save Hero Image
+                </button>
+                <button
+                  onClick={resetHeroImage}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '8px',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Reset Default
+                </button>
+              </div>
+
+              {heroStatus && (
+                <p style={{ marginTop: '12px', color: heroStatus.includes('successfully') ? 'var(--teal)' : 'var(--text-secondary)', fontSize: '13px' }}>
+                  {heroStatus}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -536,8 +772,120 @@ export default function AdminDashboard() {
         {activePanel === 'faq' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>FAQ Management</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>FAQ management features coming soon</p>
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: '20px' }}>Edit homepage FAQ questions and answers. Click save to publish instantly on the landing page.</p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {faqItems.map((item, index) => (
+                  <div key={index} style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>FAQ #{index + 1}</strong>
+                      <button
+                        onClick={() => removeFaqItem(index)}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--border-default)',
+                          color: 'var(--text-secondary)',
+                          borderRadius: '8px',
+                          padding: '5px 10px',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={item.q}
+                      onChange={(e) => updateFaqItem(index, 'q', e.target.value)}
+                      placeholder="Question"
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-default)',
+                        background: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '14px',
+                        marginBottom: '10px',
+                        outline: 'none',
+                      }}
+                    />
+
+                    <textarea
+                      value={item.a}
+                      onChange={(e) => updateFaqItem(index, 'a', e.target.value)}
+                      placeholder="Answer"
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-default)',
+                        background: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '14px',
+                        resize: 'vertical',
+                        outline: 'none',
+                        fontFamily: 'var(--font-body)',
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={addFaqItem}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '8px',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  + Add FAQ
+                </button>
+                <button
+                  onClick={saveFaqItems}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'var(--gold)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: 'var(--text-inverse)',
+                    cursor: 'pointer',
+                    fontWeight: '700',
+                  }}
+                >
+                  Save FAQ
+                </button>
+                <button
+                  onClick={resetFaqItems}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '8px',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Reset Default
+                </button>
+              </div>
+
+              {faqStatus && (
+                <p style={{ marginTop: '12px', color: faqStatus.includes('successfully') ? 'var(--teal)' : 'var(--danger)', fontSize: '13px' }}>
+                  {faqStatus}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -546,8 +894,139 @@ export default function AdminDashboard() {
         {activePanel === 'categories' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>Categories</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>Category management features coming soon</p>
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: '20px' }}>Edit homepage category cards (label, icon, and pill color).</p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {categoriesItems.map((item, index) => (
+                  <div key={item.id || index} style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>Category #{index + 1}</strong>
+                      <button
+                        onClick={() => removeCategoryItem(index)}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--border-default)',
+                          color: 'var(--text-secondary)',
+                          borderRadius: '8px',
+                          padding: '5px 10px',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 0.8fr 1fr', gap: '10px' }}>
+                      <input
+                        type="text"
+                        value={item.label}
+                        onChange={(e) => updateCategoryItem(index, 'label', e.target.value)}
+                        placeholder="Category label"
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-default)',
+                          background: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none',
+                        }}
+                      />
+
+                      <input
+                        type="text"
+                        value={item.icon}
+                        onChange={(e) => updateCategoryItem(index, 'icon', e.target.value)}
+                        placeholder="Icon"
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-default)',
+                          background: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none',
+                        }}
+                      />
+
+                      <select
+                        value={item.pill}
+                        onChange={(e) => updateCategoryItem(index, 'pill', e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-default)',
+                          background: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '14px',
+                          outline: 'none',
+                        }}
+                      >
+                        <option value="pill-gold">Gold</option>
+                        <option value="pill-teal">Teal</option>
+                        <option value="pill-violet">Violet</option>
+                        <option value="pill-rose">Rose</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={addCategoryItem}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '8px',
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  + Add Category
+                </button>
+                <button
+                  onClick={saveCategoriesItems}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'var(--gold)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: 'var(--text-inverse)',
+                    cursor: 'pointer',
+                    fontWeight: '700',
+                  }}
+                >
+                  Save Categories
+                </button>
+                <button
+                  onClick={resetCategoriesItems}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '8px',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Reset Default
+                </button>
+              </div>
+
+              {categoriesStatus && (
+                <p style={{ marginTop: '12px', color: categoriesStatus.includes('successfully') ? 'var(--teal)' : 'var(--danger)', fontSize: '13px' }}>
+                  {categoriesStatus}
+                </p>
+              )}
             </div>
           </div>
         )}

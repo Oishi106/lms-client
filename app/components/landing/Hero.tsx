@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import { DEFAULT_HERO_IMAGE_URL, HERO_IMAGE_STORAGE_KEY } from "@/app/lib/hero-data";
 
 type HeroProps = {
   onPrimaryCta?: () => void;
@@ -9,6 +10,29 @@ type HeroProps = {
 
 export default function Hero({ onPrimaryCta }: HeroProps) {
   const router = useRouter();
+
+  const heroImageUrl = useSyncExternalStore(
+    (callback) => {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === HERO_IMAGE_STORAGE_KEY) callback();
+      };
+      const onLocalUpdate = () => callback();
+
+      window.addEventListener("storage", onStorage);
+      window.addEventListener("skillforge-hero-updated", onLocalUpdate);
+
+      return () => {
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener("skillforge-hero-updated", onLocalUpdate);
+      };
+    },
+    () => {
+      const stored = window.localStorage.getItem(HERO_IMAGE_STORAGE_KEY);
+      return stored?.trim() || DEFAULT_HERO_IMAGE_URL;
+    },
+    () => DEFAULT_HERO_IMAGE_URL
+  );
+
   useEffect(() => {
     const els = Array.from(
       document.querySelectorAll<HTMLElement>(".hero [data-target]")
@@ -161,7 +185,22 @@ export default function Hero({ onPrimaryCta }: HeroProps) {
               </div>
 
               <div className="hero-main-card">
-                <div className="hero-card-cover">🤖</div>
+                <div
+                  className="hero-card-cover"
+                  style={
+                    heroImageUrl
+                      ? {
+                          backgroundImage: `url(${heroImageUrl})`,
+                          backgroundSize: "cover",
+                          backgroundPosition: "center",
+                          backgroundRepeat: "no-repeat",
+                          color: "transparent",
+                        }
+                      : undefined
+                  }
+                >
+                  {heroImageUrl ? "" : "🤖"}
+                </div>
                 <div className="hero-card-body">
                   <div
                     style={{

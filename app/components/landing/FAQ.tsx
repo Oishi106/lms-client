@@ -1,39 +1,48 @@
-const FAQS = [
-  {
-    q: "Is SkillForge free?",
-    a: "You can start for free. Some advanced courses and features may require a paid plan later.",
-  },
-  {
-    q: "Do I get certificates?",
-    a: "Yes — completed courses can generate a shareable certificate to add to your CV or LinkedIn.",
-  },
-  {
-    q: "Can I learn on mobile?",
-    a: "Yes. SkillForge works well on phones and tablets so you can learn anywhere.",
-  },
-  {
-    q: "How do instructors get approved?",
-    a: "Instructors go through a verification process and content quality review before publishing.",
-  },
-  {
-  q: "How do I enroll in a course?",
-  a: "Simply browse courses, click on your desired course, and hit the enroll button to get started instantly.",
-},
-{
-  q: "Can I track my progress?",
-  a: "Yes — you can monitor your learning progress, completed lessons, and performance from your dashboard.",
-},
-{
-  q: "Are the courses beginner-friendly?",
-  a: "Absolutely. Many courses are designed for beginners, with step-by-step guidance and easy explanations.",
-},
-{
-  q: "Can I access courses after completion?",
-  a: "Yes, once you enroll in a course, you can revisit the content anytime unless specified otherwise.",
-}
-] as const;
+"use client";
+
+import { useMemo, useSyncExternalStore } from 'react';
+import { DEFAULT_FAQS, FAQ_STORAGE_KEY, type FaqItem } from '@/app/lib/faq-data';
+
+const DEFAULT_FAQS_SNAPSHOT = JSON.stringify(DEFAULT_FAQS);
+
+const normalizeFaqs = (items: FaqItem[]): FaqItem[] => {
+  if (!Array.isArray(items) || items.length === 0) return DEFAULT_FAQS;
+  const normalizedFaqs = items
+    .map((item) => ({ q: item.q?.trim() ?? '', a: item.a?.trim() ?? '' }))
+    .filter((item) => item.q && item.a);
+  return normalizedFaqs.length > 0 ? normalizedFaqs : DEFAULT_FAQS;
+};
+
+const getClientSnapshot = (): string => {
+  const storedFaqs = window.localStorage.getItem(FAQ_STORAGE_KEY);
+  if (!storedFaqs) return DEFAULT_FAQS_SNAPSHOT;
+
+  try {
+    return JSON.stringify(normalizeFaqs(JSON.parse(storedFaqs) as FaqItem[]));
+  } catch {
+    return DEFAULT_FAQS_SNAPSHOT;
+  }
+};
+
+const subscribeFaqs = (callback: () => void) => {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === FAQ_STORAGE_KEY) callback();
+  };
+  const onLocalUpdate = () => callback();
+
+  window.addEventListener('storage', onStorage);
+  window.addEventListener('skillforge-faq-updated', onLocalUpdate);
+
+  return () => {
+    window.removeEventListener('storage', onStorage);
+    window.removeEventListener('skillforge-faq-updated', onLocalUpdate);
+  };
+};
 
 export default function FAQ() {
+  const faqSnapshot = useSyncExternalStore(subscribeFaqs, getClientSnapshot, () => DEFAULT_FAQS_SNAPSHOT);
+  const faqs = useMemo(() => JSON.parse(faqSnapshot) as FaqItem[], [faqSnapshot]);
+
   return (
     <section
       className="section"
@@ -55,7 +64,7 @@ export default function FAQ() {
         </div>
 
         <div className="faq-grid">
-          {FAQS.map((item, idx) => (
+          {faqs.map((item, idx) => (
             <details key={item.q} className="faq-item" open={idx === 0}>
               <summary className="faq-q">
                 <span>{item.q}</span>

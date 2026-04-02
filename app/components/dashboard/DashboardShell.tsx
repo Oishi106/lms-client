@@ -4,6 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useAuth } from "../../providers";
+import {
+  getInitialUserAdminChat,
+  saveUserAdminChat,
+  subscribeUserAdminChat,
+  type UserAdminChatMessage,
+} from "@/app/lib/user-admin-chat";
 
 type Panel =
   | "ov"
@@ -17,20 +23,6 @@ type Panel =
   | "analytics"
   | "settings"
   | "ai-chat";
-
-type ChatMsg = { from: "user" | "ai"; text: string };
-
-const AI_RESP = {
-  ml: "For an ML engineer path, I recommend: Python basics → NumPy/Pandas → scikit-learn → Deep learning with TensorFlow → MLOps.",
-  neural:
-    "Neural networks are layers of 'neurons' inspired by the brain. Data flows: Input → Hidden layers → Output. Weights get tuned via backpropagation.",
-  react:
-    "For React progress, next: React Query → Zustand/Redux → React Server Components (Next.js) → Testing. Want a weekly plan?",
-  practice:
-    "Here are 3 Python practice problems: 1) bubble sort 2) Stack class 3) CSV parser without csv module. Want hints?",
-  default:
-    "Based on your learning, complete your current track first, then diversify. Want a personalized study plan?",
-};
 
 function SidebarLink({
   active,
@@ -61,12 +53,7 @@ export default function DashboardShell() {
   const [activePanel, setActivePanel] = useState<Panel>("ov");
   const [profileSaved, setProfileSaved] = useState(false);
 
-  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>([
-    {
-      from: "ai",
-      text: "Hi! I'm your AI learning assistant. I can help you understand concepts, suggest next steps, or recommend what to learn next. What can I help you with?",
-    },
-  ]);
+  const [chatMsgs, setChatMsgs] = useState<UserAdminChatMessage[]>(getInitialUserAdminChat);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -79,6 +66,8 @@ export default function DashboardShell() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMsgs]);
+
+  useEffect(() => subscribeUserAdminChat(() => setChatMsgs(getInitialUserAdminChat())), []);
 
   const displayName = user?.name ?? "Learner";
 
@@ -126,22 +115,21 @@ export default function DashboardShell() {
 
   if (!user) return null;
 
-  function sendChatMsg(text?: string) {
-    const msg = (text ?? chatInput).trim();
-    if (!msg) return;
+  function sendChatMsg() {
+    const msg = chatInput.trim();
+    if (!msg || !user) return;
 
-    setChatMsgs((prev) => [...prev, { from: "user", text: msg }]);
+    const nextMessage: UserAdminChatMessage = {
+      id: `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      senderRole: "user",
+      senderName: user.name,
+      text: msg,
+      createdAt: Date.now(),
+    };
+
+    const updated = saveUserAdminChat([...chatMsgs, nextMessage]);
+    setChatMsgs(updated);
     setChatInput("");
-
-    window.setTimeout(() => {
-      const lower = msg.toLowerCase();
-      let resp: string = AI_RESP.default;
-      if (lower.includes("ml") || lower.includes("machine")) resp = AI_RESP.ml;
-      else if (lower.includes("neural") || lower.includes("network")) resp = AI_RESP.neural;
-      else if (lower.includes("react") || lower.includes("next")) resp = AI_RESP.react;
-      else if (lower.includes("practice") || lower.includes("problem")) resp = AI_RESP.practice;
-      setChatMsgs((prev) => [...prev, { from: "ai", text: resp }]);
-    }, 700);
   }
 
   return (
@@ -222,8 +210,8 @@ export default function DashboardShell() {
           <div className="sidebar-label">AI Tools</div>
           <SidebarLink
             active={activePanel === "ai-chat"}
-            icon="🤖"
-            label="AI Assistant"
+            icon="💬"
+            label="Admin Chat"
             onClick={() => setActivePanel("ai-chat")}
           />
         </div>
@@ -979,48 +967,39 @@ export default function DashboardShell() {
         <div className={`dash-page${activePanel === "ai-chat" ? " active" : ""}`}>
           <div className="dash-top">
             <div>
-              <div className="dash-top-title">AI Learning Assistant 🤖</div>
-              <div className="dash-top-sub">Context-aware for your courses</div>
+              <div className="dash-top-title">Admin Support Chat 💬</div>
+              <div className="dash-top-sub">Send message to admin and get replies here</div>
             </div>
           </div>
 
           <div className="d-card chat-wrap">
             <div className="chat-msgs">
-              {chatMsgs.map((m, idx) =>
-                m.from === "ai" ? (
-                  <div className="chat-bubble-ai" key={idx}>
-                    <div className="ai-avatar">🤖</div>
-                    <div className="bubble-ai">
-                      <div className="bubble-sender">SkillForge AI</div>
-                      {m.text}
-                      {idx === 0 ? (
-                        <div className="chat-chips">
-                          <div className="chat-chip" onClick={() => sendChatMsg("Suggest a learning path for ML engineer")}
-                          >
-                            🎯 ML Career Path
-                          </div>
-                          <div className="chat-chip" onClick={() => sendChatMsg("Explain neural networks simply")}
-                          >
-                            🧠 Neural Networks
-                          </div>
-                          <div className="chat-chip" onClick={() => sendChatMsg("What React concepts should I learn next?")}
-                          >
-                            ⚛️ React Next Steps
-                          </div>
-                          <div className="chat-chip" onClick={() => sendChatMsg("Generate practice problems for Python")}
-                          >
-                            📝 Practice Problems
-                          </div>
-                        </div>
-                      ) : null}
+              {chatMsgs.map((m) => (
+                <div
+                  key={m.id}
+                  style={{
+                    marginBottom: 12,
+                    display: "flex",
+                    justifyContent: m.senderRole === "user" ? "flex-end" : "flex-start",
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: "80%",
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      background: m.senderRole === "user" ? "var(--gold)" : "var(--bg-card-alt)",
+                      color: m.senderRole === "user" ? "var(--text-inverse)" : "var(--text-primary)",
+                      border: m.senderRole === "user" ? "none" : "1px solid var(--border-default)",
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, marginBottom: 4 }}>
+                      {m.senderRole === "user" ? "You" : m.senderName}
                     </div>
+                    <div style={{ fontSize: 14, lineHeight: 1.45 }}>{m.text}</div>
                   </div>
-                ) : (
-                  <div className="chat-bubble-user" key={idx}>
-                    <div className="bubble-user">{m.text}</div>
-                  </div>
-                )
-              )}
+                </div>
+              ))}
               <div ref={chatEndRef} />
             </div>
 
@@ -1030,7 +1009,7 @@ export default function DashboardShell() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask anything about your courses, concepts, or career path..."
+                placeholder="Write your message for admin..."
                 style={{ flex: 1 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") sendChatMsg();
