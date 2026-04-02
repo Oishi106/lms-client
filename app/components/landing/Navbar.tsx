@@ -33,10 +33,10 @@ export default function Navbar() {
           <Link className="nav-link" href="/">
             Home
           </Link>
-          <Link className="nav-link" href="/#explore">
+          <Link className="nav-link" href="/explore">
             Explore
           </Link>
-          <Link className="nav-link" href="/#categories">
+          <Link className="nav-link" href="/categories">
             Categories
           </Link>
           <Link className="nav-link" href="/#instructors">
