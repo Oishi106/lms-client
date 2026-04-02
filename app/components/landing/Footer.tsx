@@ -1,34 +1,38 @@
+"use client";
+
+import Link from "next/link";
+
 export default function Footer() {
   return (
     <footer className="footer">
       <div className="container">
         <div className="footer-grid">
           <div>
-            <a
+            <Link
               className="nav-logo"
-              href="#home"
+              href="/"
               style={{ display: "inline-flex", marginBottom: 2 }}
             >
               <div className="nav-logo-mark" aria-hidden>
                 ⚡
               </div>
               SkillForge
-            </a>
+            </Link>
             <p className="footer-brand-desc">
               Empowering the next generation of professionals through expert-led,
               AI-enhanced online education. Built with Next.js + TypeScript.
             </p>
             <div className="social-row">
-              <a className="social-icon" href="#" aria-label="X">
+              <a className="social-icon" href="https://twitter.com" target="_blank" rel="noopener noreferrer" aria-label="X">
                 𝕏
               </a>
-              <a className="social-icon" href="#" aria-label="LinkedIn">
+              <a className="social-icon" href="https://linkedin.com" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
                 in
               </a>
-              <a className="social-icon" href="#" aria-label="YouTube">
+              <a className="social-icon" href="https://youtube.com" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
                 ▶
               </a>
-              <a className="social-icon" href="#" aria-label="Instagram">
+              <a className="social-icon" href="https://instagram.com" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
                 📷
               </a>
             </div>
@@ -36,35 +40,35 @@ export default function Footer() {
 
           <div className="footer-col">
             <h4>Platform</h4>
-            <a className="footer-link" href="#home">
+            <Link className="footer-link" href="/explore">
               Browse Courses
-            </a>
-            <a className="footer-link" href="#about">
+            </Link>
+            <a className="footer-link" href="/#about">
               About
             </a>
-            <a className="footer-link" href="#contact">
+            <Link className="footer-link" href="/contact">
               Contact
-            </a>
+            </Link>
           </div>
 
           <div className="footer-col">
             <h4>Company</h4>
-            <a className="footer-link" href="#about">
+            <a className="footer-link" href="/#about">
               About Us
             </a>
-            <a className="footer-link" href="#contact">
+            <Link className="footer-link" href="/contact">
               Partnerships
-            </a>
+            </Link>
           </div>
 
           <div className="footer-col">
             <h4>Support</h4>
-            <a className="footer-link" href="#contact">
+            <Link className="footer-link" href="/contact">
               Help Center
-            </a>
-            <a className="footer-link" href="#contact">
+            </Link>
+            <Link className="footer-link" href="/contact">
               Contact Us
-            </a>
+            </Link>
           </div>
         </div>
 

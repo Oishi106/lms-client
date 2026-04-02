@@ -24,11 +24,12 @@ export default function RegisterForm() {
   const router = useRouter();
   const { login } = useAuth();
 
+  const [userType, setUserType] = useState<'user' | 'admin'>('user');
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [submitting, setSubmitting] = useState(false);
 
   const [firstError, setFirstError] = useState<string | null>(null);
@@ -42,39 +43,121 @@ export default function RegisterForm() {
 
   return (
     <AuthShell
-      title="Create account"
-      subtitle="Join 2.4 million learners on SkillForge"
+      title={userType === 'admin' ? 'Become an Admin' : 'Create account'}
+      subtitle={userType === 'admin' ? 'Manage courses and instructors' : 'Join 2.4 million learners on SkillForge'}
       maxWidth={460}
     >
-      <div className={`success-banner ${submitting ? "show" : ""}`}>
-        🎉 Account created! Welcome to SkillForge!
-      </div>
+      <style>{`
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
 
-      <div className="social-auth">
+        @keyframes pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(251, 146, 60, 0.7); }
+          50% { box-shadow: 0 0 0 10px rgba(251, 146, 60, 0); }
+        }
+
+        .role-selector {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-bottom: 28px;
+          animation: slideIn 0.5s ease-out;
+        }
+
+        .role-btn {
+          padding: 16px;
+          border: 2px solid var(--border-default);
+          border-radius: 12px;
+          background: var(--bg-surface);
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 16px;
+          transition: all 0.3s ease;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          color: var(--text-secondary);
+        }
+
+        .role-btn:hover {
+          border-color: var(--gold);
+          background: rgba(251, 146, 60, 0.05);
+          transform: translateY(-2px);
+        }
+
+        .role-btn.active {
+          border-color: var(--gold);
+          background: rgba(251, 146, 60, 0.1);
+          color: var(--gold);
+          box-shadow: 0 8px 24px rgba(251, 146, 60, 0.15);
+          animation: pulse 2s infinite;
+        }
+
+        .role-icon {
+          font-size: 20px;
+        }
+
+        .role-label {
+          font-size: 12px;
+        }
+      `}</style>
+
+      {/* Premium Role Selector */}
+      <div className="role-selector">
         <button
-          className="social-auth-btn"
           type="button"
-          onClick={() => {
-            doRegister({
-              name: "Google User",
-              email: "google@example.com",
-              initials: "GU",
-              role: "user",
-            });
-          }}
+          className={`role-btn ${userType === 'user' ? 'active' : ''}`}
+          onClick={() => setUserType('user')}
         >
-          🔵 Google
+          <span className="role-icon">👤</span>
+          <span className="role-label">Learner</span>
         </button>
-        <button className="social-auth-btn" type="button" disabled>
-          🔷 Facebook
+        <button
+          type="button"
+          className={`role-btn ${userType === 'admin' ? 'active' : ''}`}
+          onClick={() => setUserType('admin')}
+        >
+          <span className="role-icon">🛡️</span>
+          <span className="role-label">Admin</span>
         </button>
       </div>
 
-      <div className="or-line">or sign up with email</div>
+      <div className={`success-banner ${submitting ? "show" : ""}`}>
+        {userType === 'admin' ? '🎉 Admin account created!' : '🎉 Account created! Welcome to SkillForge!'}
+      </div>
 
+      {/* Social Auth - Only for Learners */}
+      {userType === 'user' && (
+        <div className="social-auth">
+          <button
+            className="social-auth-btn"
+            type="button"
+            onClick={() => {
+              doRegister({
+                name: "Google User",
+                email: "google@example.com",
+                initials: "GU",
+                role: "user",
+              });
+            }}
+          >
+            🔵 Google
+          </button>
+          <button className="social-auth-btn" type="button" disabled>
+            🔷 Facebook
+          </button>
+        </div>
+      )}
+
+      <div className="or-line">or {userType === 'admin' ? 'create admin account' : 'sign up'} with email</div>
+
+      {/* Name Fields */}
       <div className="form-row-2">
         <div className="form-group">
-          <label className="form-label">First Name</label>
+          <label className="form-label">{userType === 'admin' ? 'First Name' : 'First Name'}</label>
           <input
             className={`input-field${firstError ? " error" : ""}`}
             type="text"
@@ -97,6 +180,21 @@ export default function RegisterForm() {
           />
         </div>
       </div>
+
+      {/* Company Name - Only for Admins */}
+      {userType === 'admin' && (
+        <div className="form-group">
+          <label className="form-label">Company/Organization Name</label>
+          <input
+            className="input-field"
+            type="text"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="Your company name"
+            autoComplete="organization"
+          />
+        </div>
+      )}
 
       <div className="form-group">
         <label className="form-label">Email Address</label>
@@ -126,11 +224,21 @@ export default function RegisterForm() {
 
       <div className="form-group">
         <label className="form-label">I want to</label>
-        <select className="input-field" defaultValue="Learn new skills">
-          <option>Learn new skills</option>
-          <option>Switch careers</option>
-          <option>Get certified</option>
-          <option>Become an instructor</option>
+        <select className="input-field">
+          {userType === 'user' ? (
+            <>
+              <option>Learn new skills</option>
+              <option>Switch careers</option>
+              <option>Get certified</option>
+              <option>Become an instructor</option>
+            </>
+          ) : (
+            <>
+              <option>Manage courses</option>
+              <option>Manage instructors</option>
+              <option>Manage students</option>
+            </>
+          )}
         </select>
       </div>
 
@@ -149,11 +257,11 @@ export default function RegisterForm() {
             ok = false;
           }
           if (!isValidEmail(email)) {
-            setEmailError("Enter a valid email address.");
+            setEmailError("Please enter a valid email.");
             ok = false;
           }
           if (password.length < 6) {
-            setPasswordError("Minimum 6 characters required.");
+            setPasswordError("Password must be at least 6 characters.");
             ok = false;
           }
           if (!ok) return;
@@ -167,12 +275,12 @@ export default function RegisterForm() {
               name: displayName,
               email,
               initials: toInitials(displayName),
-              role: "user",
+              role: userType,
             });
-          }, 900);
+          }, 700);
         }}
       >
-        Create Free Account →
+        {userType === 'admin' ? 'Create Admin Account' : 'Create Free Account'} →
       </button>
 
       <p style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 12 }}>
