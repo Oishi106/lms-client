@@ -2,9 +2,19 @@
 
 import Navbar from "../components/landing/Navbar";
 import Link from "next/link";
+import { useMemo, useSyncExternalStore } from "react";
 import { COURSES, FILTER_CATEGORIES, FILTER_LEVELS } from "../lib/courses-data";
+import { getManagedCoursesClient, getDefaultManagedCourses, subscribeManagedCourses } from "@/app/lib/managed-courses-data";
 
 export default function ExplorePage() {
+  const coursesSnapshot = useSyncExternalStore(
+    subscribeManagedCourses,
+    () => JSON.stringify(getManagedCoursesClient()),
+    () => JSON.stringify(getDefaultManagedCourses())
+  );
+
+  const managedCourses = useMemo(() => JSON.parse(coursesSnapshot) as typeof COURSES, [coursesSnapshot]);
+
   return (
     <>
       <Navbar />
@@ -90,7 +100,7 @@ export default function ExplorePage() {
 
             <section className="explore-results" aria-label="Course results">
               <div className="explore-topbar">
-                <div className="explore-count">Showing 480 courses</div>
+                <div className="explore-count">Showing {managedCourses.length} courses</div>
                 <div className="explore-sort">
                   <select className="explore-sort-select" defaultValue="popular">
                     <option value="popular">Most Popular</option>
@@ -102,7 +112,7 @@ export default function ExplorePage() {
               </div>
 
               <div className="course-grid-3">
-                {COURSES.map((c) => (
+                {managedCourses.map((c) => (
                   <Link key={c.id} href={`/course/${c.id}`}>
                     <article className="course-card" data-accent={c.accent}>
                       <div className="course-cover">

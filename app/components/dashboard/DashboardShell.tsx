@@ -10,6 +10,7 @@ import {
   subscribeUserAdminChat,
   type UserAdminChatMessage,
 } from "@/app/lib/user-admin-chat";
+import { appendAdminNotification } from "@/app/lib/admin-notifications";
 
 type Panel =
   | "ov"
@@ -129,6 +130,11 @@ export default function DashboardShell() {
 
     const updated = saveUserAdminChat([...chatMsgs, nextMessage]);
     setChatMsgs(updated);
+    appendAdminNotification({
+      type: "message",
+      title: "New User Message",
+      description: `${user.name} sent a new support message.`,
+    });
     setChatInput("");
   }
 

@@ -1,16 +1,24 @@
-import { getCourseById } from "@/app/lib/courses-data";
+"use client";
+
 import Navbar from "@/app/components/landing/Navbar";
 import Link from "next/link";
-import { COURSES } from "@/app/lib/courses-data";
+import { useMemo, useSyncExternalStore } from "react";
+import { useParams } from "next/navigation";
 import CourseDetailsTabs from "@/app/components/course/CourseDetailsTabs";
+import CoursePurchaseActions from "@/app/components/course/CoursePurchaseActions";
+import CourseVideoPlayer from "@/app/components/course/CourseVideoPlayer";
+import { getDefaultManagedCourses, getManagedCoursesClient, subscribeManagedCourses } from "@/app/lib/managed-courses-data";
 
-interface CoursePageProps {
-  params: Promise<{ id: string }>;
-}
+export default function CoursePage() {
+  const params = useParams<{ id: string }>();
 
-export default async function CoursePage({ params }: CoursePageProps) {
-  const { id } = await params;
-  const course = getCourseById(id);
+  const coursesSnapshot = useSyncExternalStore(
+    subscribeManagedCourses,
+    () => JSON.stringify(getManagedCoursesClient()),
+    () => JSON.stringify(getDefaultManagedCourses())
+  );
+  const managedCourses = useMemo(() => JSON.parse(coursesSnapshot) as ReturnType<typeof getDefaultManagedCourses>, [coursesSnapshot]);
+  const course = useMemo(() => managedCourses.find((item) => item.id === params.id), [managedCourses, params.id]);
 
   if (!course) {
     return (
@@ -31,7 +39,7 @@ export default async function CoursePage({ params }: CoursePageProps) {
   }
 
   // Get related courses (same tag, different course)
-  const relatedCourses = COURSES.filter(
+  const relatedCourses = managedCourses.filter(
     (c) => c.tag === course.tag && c.id !== course.id
   ).slice(0, 3);
 
@@ -196,22 +204,7 @@ export default async function CoursePage({ params }: CoursePageProps) {
                   </span>
                 </div>
 
-                <div style={{ display: "flex", gap: "12px" }}>
-                  <button
-                    className="btn btn-primary"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    type="button"
-                  >
-                    Enroll Now — {course.price}
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    type="button"
-                  >
-                    Try Free Preview
-                  </button>
-                </div>
+                <CoursePurchaseActions courseId={course.id} price={course.price} />
 
                 <div
                   style={{
@@ -257,6 +250,12 @@ export default async function CoursePage({ params }: CoursePageProps) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "40px", marginBottom: "60px" }}>
             {/* Left: Course Content */}
             <div>
+              <CourseVideoPlayer
+                courseId={course.id}
+                videoUrl={course.videoUrl}
+                previewSeconds={course.previewSeconds ?? 30}
+              />
+
               {/* Tabs */}
               <CourseDetailsTabs course={course} />
 

@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { useMemo, useState, useSyncExternalStore } from 'react';
-import { COURSES } from '@/app/lib/courses-data';
 import Navbar from '@/app/components/landing/Navbar';
 import Footer from '@/app/components/landing/Footer';
 import { CATEGORIES_STORAGE_KEY, DEFAULT_CATEGORIES, type CategoryItem } from '@/app/lib/categories-data';
+import { getDefaultManagedCourses, getManagedCoursesClient, subscribeManagedCourses } from '@/app/lib/managed-courses-data';
 
-type CourseTag = (typeof COURSES)[number]['tag'];
+type CourseTag = string;
 
 interface Category {
   id: string;
@@ -69,6 +69,13 @@ const subscribeCategories = (callback: () => void) => {
 };
 
 export default function CategoriesPage() {
+  const coursesSnapshot = useSyncExternalStore(
+    subscribeManagedCourses,
+    () => JSON.stringify(getManagedCoursesClient()),
+    () => JSON.stringify(getDefaultManagedCourses())
+  );
+  const managedCourses = useMemo(() => JSON.parse(coursesSnapshot) as ReturnType<typeof getDefaultManagedCourses>, [coursesSnapshot]);
+
   const categoriesSnapshot = useSyncExternalStore(subscribeCategories, getClientSnapshot, () => DEFAULT_CATEGORIES_SNAPSHOT);
   const baseCategories = useMemo(() => JSON.parse(categoriesSnapshot) as CategoryItem[], [categoriesSnapshot]);
 
@@ -91,11 +98,11 @@ export default function CategoriesPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   const filteredCourses = useMemo(() => {
-    if (!selectedCategoryId) return COURSES;
+    if (!selectedCategoryId) return managedCourses;
     const selectedCategory = categories.find((category) => category.id === selectedCategoryId);
     if (!selectedCategory) return [];
-    return COURSES.filter((course) => course.tag === selectedCategory.tag);
-  }, [selectedCategoryId, categories]);
+    return managedCourses.filter((course) => course.tag === selectedCategory.tag);
+  }, [selectedCategoryId, categories, managedCourses]);
 
   const selectedCategoryData = categories.find((category) => category.id === selectedCategoryId);
 
