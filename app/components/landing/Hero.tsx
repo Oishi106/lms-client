@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 type HeroProps = {
   onPrimaryCta?: () => void;
 };
 
 export default function Hero({ onPrimaryCta }: HeroProps) {
+  const router = useRouter();
   useEffect(() => {
     const els = Array.from(
       document.querySelectorAll<HTMLElement>(".hero [data-target]")
@@ -66,13 +68,20 @@ export default function Hero({ onPrimaryCta }: HeroProps) {
               <button
                 className="btn btn-primary btn-lg"
                 type="button"
-                onClick={onPrimaryCta}
+                onClick={() => {
+                  if (onPrimaryCta) onPrimaryCta();
+                  router.push("/explore");
+                }}
               >
                 Browse Courses →
               </button>
-              <a className="btn btn-ghost btn-lg" href="#about">
+              <button
+                className="btn btn-ghost btn-lg"
+                type="button"
+                onClick={() => router.push("/explore")}
+              >
                 ▶ Watch Demo
-              </a>
+              </button>
             </div>
 
             <div className="hero-social-proof animate-up delay-4">

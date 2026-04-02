@@ -48,7 +48,7 @@ export default function Navbar() {
           <Link className="nav-link" href="/#about">
             About
           </Link>
-          <Link className="nav-link" href="/#contact">
+          <Link className="nav-link" href="/contact">
             Contact
           </Link>
           {safeUser ? (

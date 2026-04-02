@@ -1,7 +1,6 @@
 import {
   About,
   Categories,
-  Contact,
   Explore,
   FAQ,
   Footer,
@@ -24,7 +23,6 @@ export default function HomePage() {
         <FAQ />
         <About />
         <Process />
-        <Contact />
         <GetInTouch />
       </main>
       <Footer />
