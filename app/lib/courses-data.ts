@@ -43,7 +43,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=aircAruvnKk",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Master machine learning from fundamentals to advanced techniques. This bootcamp covers Python, scikit-learn, TensorFlow, deep learning, natural networks, and ML deployment to production of scale.",
     learnings: [
       "Build ML models from fundamentals",
@@ -73,7 +73,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=w7ejDZ8SWv8",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Learn React and Next.js from scratch. Build full-stack applications with React hooks, state management, server-side rendering, and API routes.",
     learnings: [
       "React fundamentals and hooks",
@@ -103,7 +103,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=c9Wg6Cb_YlU",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Learn UI/UX design principles and tools. Master Figma, design systems, prototyping, and user research.",
     learnings: [
       "UI/UX design principles",
@@ -133,7 +133,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=LHBE6Q9XlzI",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Learn Python, NumPy, Pandas, and Matplotlib for data science and analysis.",
     learnings: [
       "Python programming basics",
@@ -163,7 +163,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=Ia-UEYYR44s",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Prepare for AWS Solutions Architect exam. Learn AWS architecture, security, and best practices.",
     learnings: [
       "AWS core services",
@@ -193,7 +193,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=3Kq1MIfTWCE",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Learn ethical hacking, penetration testing, and network security.",
     learnings: [
       "Network fundamentals",
@@ -223,7 +223,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=VPvVD8t02U8",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Build native iOS and Android apps. Learn Swift and Kotlin.",
     learnings: [
       "Swift for iOS development",
@@ -253,7 +253,7 @@ export const COURSES: Course[] = [
     language: "English",
     access: "Lifetime",
     videoUrl: "https://www.youtube.com/watch?v=V_xro1bcAuA",
-    previewSeconds: 30,
+    previewSeconds: 300,
     description: "Master deep learning with PyTorch framework. Build neural networks and advanced models.",
     learnings: [
       "PyTorch fundamentals",

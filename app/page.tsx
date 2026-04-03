@@ -9,6 +9,7 @@ import {
   Instructors,
   Navbar,
   Process,
+  AiHelpAgent,
 } from "./components/landing";
 
 export default function HomePage() {
@@ -25,6 +26,7 @@ export default function HomePage() {
         <Process />
         <GetInTouch />
       </main>
+      <AiHelpAgent />
       <Footer />
     </>
   );

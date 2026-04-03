@@ -37,7 +37,7 @@ const getYoutubeVideoId = (url: string): string | null => {
 export default function CourseVideoPlayer({
   courseId,
   videoUrl,
-  previewSeconds = 30,
+  previewSeconds = 300,
 }: CourseVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [purchased, setPurchased] = useState(false);
@@ -88,7 +88,8 @@ export default function CourseVideoPlayer({
 
   const subtitle = useMemo(() => {
     if (purchased) return "Full course video unlocked. Enjoy complete access.";
-    return `Preview mode: first ${previewSeconds} seconds only. Complete payment to watch full video.`;
+    const minutes = Math.floor(previewSeconds / 60);
+    return `Preview mode: first ${minutes} minute${minutes === 1 ? "" : "s"} only. Complete payment to watch full video.`;
   }, [purchased, previewSeconds]);
 
   const youtubeId = useMemo(() => getYoutubeVideoId(activeVideoUrl), [activeVideoUrl]);

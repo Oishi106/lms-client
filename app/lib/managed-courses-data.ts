@@ -45,8 +45,8 @@ const sanitizeCourse = (item: Partial<Course>, index: number): Course => {
     videoUrl: item.videoUrl?.trim() || fallback.videoUrl,
     previewSeconds:
       typeof item.previewSeconds === 'number' && item.previewSeconds > 0
-        ? item.previewSeconds
-        : fallback.previewSeconds,
+        ? Math.max(item.previewSeconds, 300)
+        : Math.max(fallback.previewSeconds ?? 300, 300),
   };
 };
 

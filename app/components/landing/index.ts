@@ -9,3 +9,4 @@ export { default as Process } from "./Process";
 export { default as Contact } from "./Contact";
 export { default as GetInTouch } from "./GetInTouch";
 export { default as Footer } from "./Footer";
+export { default as AiHelpAgent } from "./AiHelpAgent";

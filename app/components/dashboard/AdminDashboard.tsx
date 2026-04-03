@@ -29,7 +29,7 @@ const blankCourse = (): Course => ({
   price: '$49',
   oldPrice: '$99',
   videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-  previewSeconds: 30,
+  previewSeconds: 300,
 });
 
 const getInitialCategories = (): CategoryItem[] => {

@@ -253,7 +253,7 @@ export default function CoursePage() {
               <CourseVideoPlayer
                 courseId={course.id}
                 videoUrl={course.videoUrl}
-                previewSeconds={course.previewSeconds ?? 30}
+                previewSeconds={course.previewSeconds ?? 300}
               />
 
               {/* Tabs */}
