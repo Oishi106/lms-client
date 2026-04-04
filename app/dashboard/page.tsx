@@ -3,18 +3,14 @@
 import { Navbar } from "../components/landing";
 import DashboardShell from "../components/dashboard/DashboardShell";
 import AdminDashboard from "../components/dashboard/AdminDashboard";
-import { useAuth } from "../providers";
-import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 
 export default function DashboardPage() {
-  const { user } = useAuth();
-  const [mounted, setMounted] = useState(false);
+  const { data: session, status } = useSession();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  if (status === "loading") return null;
 
-  if (!mounted) return null;
+  const user = session?.user;
 
   return (
     <>

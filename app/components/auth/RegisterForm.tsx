@@ -1,28 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn, useSession } from "next-auth/react";
 
 import AuthShell from "./AuthShell";
-import { AuthUser, useAuth } from "../../providers";
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function toInitials(name: string) {
-  const cleaned = name.trim();
-  if (!cleaned) return "U";
-  const parts = cleaned.split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "U";
-  const second = (parts[1]?.[0] ?? parts[0]?.[1] ?? "").toString();
-  return (first + second).toUpperCase();
-}
-
 export default function RegisterForm() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { status } = useSession();
 
   const [userType, setUserType] = useState<'user' | 'admin'>('user');
   const [firstName, setFirstName] = useState("");
@@ -35,10 +26,76 @@ export default function RegisterForm() {
   const [firstError, setFirstError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  function doRegister(next: AuthUser) {
-    login(next);
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace("/dashboard");
+    }
+  }, [status, router]);
+
+  async function doGoogleRegister() {
+    setSubmitting(true);
+    setAuthError(null);
+
+    const result = await signIn("google", {
+      redirect: false,
+      callbackUrl: "/dashboard",
+    });
+
+    if (result?.error) {
+      setAuthError("Google sign-up is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.");
+      setSubmitting(false);
+      return;
+    }
+
     router.push("/dashboard");
+    router.refresh();
+  }
+
+  async function doRegister() {
+    setSubmitting(true);
+    setAuthError(null);
+
+    const response = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        firstName,
+        lastName,
+        companyName,
+        email,
+        password,
+        role: userType,
+      }),
+    });
+
+    const data = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setAuthError(data.error ?? "Unable to create account.");
+      setSubmitting(false);
+      return;
+    }
+
+    const signInResult = await signIn("credentials", {
+      email,
+      password,
+      role: userType,
+      redirect: false,
+      callbackUrl: "/dashboard",
+    });
+
+    if (signInResult?.error) {
+      setAuthError("Account created, but automatic sign-in failed. Please login manually.");
+      setSubmitting(false);
+      router.push("/login");
+      return;
+    }
+
+    router.push("/dashboard");
+    router.refresh();
   }
 
   return (
@@ -71,20 +128,14 @@ export default function RegisterForm() {
       <div className={`success-banner ${submitting ? "show" : ""}`}>
         {userType === "admin" ? "Admin account ready." : "Account created. Welcome to SkillForge."}
       </div>
+      <div className={`error-text${authError ? " show" : ""}`}>{authError}</div>
 
       {userType === "user" && (
         <div className="social-auth">
           <button
             className="social-auth-btn"
             type="button"
-            onClick={() => {
-              doRegister({
-                name: "Google User",
-                email: "google@example.com",
-                initials: "GU",
-                role: "user",
-              });
-            }}
+            onClick={doGoogleRegister}
           >
             Continue with Google
           </button>
@@ -185,10 +236,12 @@ export default function RegisterForm() {
       <button
         className="btn btn-primary auth-submit"
         type="button"
-        onClick={() => {
+        disabled={submitting || status === "loading"}
+        onClick={async () => {
           setFirstError(null);
           setEmailError(null);
           setPasswordError(null);
+          setAuthError(null);
 
           let ok = true;
           if (!firstName.trim()) {
@@ -205,18 +258,7 @@ export default function RegisterForm() {
           }
           if (!ok) return;
 
-          setSubmitting(true);
-
-          const displayName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ") || firstName.trim();
-
-          window.setTimeout(() => {
-            doRegister({
-              name: displayName,
-              email,
-              initials: toInitials(displayName),
-              role: userType,
-            });
-          }, 700);
+          await doRegister();
         }}
       >
         {submitting ? "Creating account..." : userType === "admin" ? "Create Admin Account" : "Create Free Account"}

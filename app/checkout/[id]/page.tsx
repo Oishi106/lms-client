@@ -2,15 +2,16 @@
 
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Navbar from "@/app/components/landing/Navbar";
 import { getDefaultManagedCourses, getManagedCoursesClient, subscribeManagedCourses } from "@/app/lib/managed-courses-data";
 import { savePaidOrder, type CourseOrder } from "@/app/lib/payments-data";
-import { useAuth } from "@/app/providers";
 
 export default function CheckoutPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { data: session } = useSession();
+  const user = session?.user;
 
   const coursesSnapshot = useSyncExternalStore(
     subscribeManagedCourses,

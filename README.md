@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LMS Client (Next.js + TypeScript)
 
-## Getting Started
+This project now uses `next-auth` for authentication with App Router.
 
-First, run the development server:
+## 1) Environment Setup
+
+Copy `.env.example` to `.env.local` and set values:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=replace-with-a-long-random-secret
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Generate a secure secret (example):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 2) Run App
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open http://localhost:3000.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 3) Auth Flow (Current)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Auth provider: NextAuth Credentials provider
+- Auth provider: NextAuth Credentials provider + Google OAuth
+- Login page: `/login`
+- Register page: `/register`
+- Protected routes: `/dashboard/*`, `/checkout/*` via `middleware.ts`
+- Session strategy: JWT
 
-## Deploy on Vercel
+### Demo Credentials
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Learner: `user@example.com` / `123456`
+- Admin: `admin@example.com` / `123456`
+- Google: requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 4) Important Auth Files
+
+- `app/api/auth/[...nextauth]/route.ts`: NextAuth route handler
+- `app/lib/auth-options.ts`: NextAuth config (providers, callbacks, pages)
+- `app/lib/auth-users.ts`: in-memory demo/register user store
+- `app/api/auth/register/route.ts`: registration API used by UI
+- `types/next-auth.d.ts`: session/jwt type augmentation
+- `middleware.ts`: route protection
+- `app/providers.tsx`: `SessionProvider` + theme provider
+
+## 5) Notes
+
+- Registration currently stores users in memory (good for local/dev demo).
+- For production, connect a real database (Prisma/Mongo/Postgres) and hash passwords.

@@ -43,9 +43,9 @@ export default function Footer() {
             <Link className="footer-link" href="/explore">
               Browse Courses
             </Link>
-            <a className="footer-link" href="/#about">
+            <Link className="footer-link" href="/#about">
               About
-            </a>
+            </Link>
             <Link className="footer-link" href="/contact">
               Contact
             </Link>
@@ -53,9 +53,9 @@ export default function Footer() {
 
           <div className="footer-col">
             <h4>Company</h4>
-            <a className="footer-link" href="/#about">
+            <Link className="footer-link" href="/#about">
               About Us
-            </a>
+            </Link>
             <Link className="footer-link" href="/contact">
               Partnerships
             </Link>

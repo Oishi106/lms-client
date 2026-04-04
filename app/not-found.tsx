@@ -1,17 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 
 export default function NotFound() {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return null;
-
   return (
     <div
       style={{
@@ -218,8 +209,8 @@ export default function NotFound() {
             margin: '0 auto 40px',
           }}
         >
-          Oops! The page you're looking for has wandered off into the digital void. 
-          Let's get you back on track!
+          Oops! The page you&apos;re looking for has wandered off into the digital void. 
+          Let&apos;s get you back on track!
         </p>
 
         {/* Action Buttons */}

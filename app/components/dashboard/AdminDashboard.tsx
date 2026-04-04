@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/app/providers';
+import { useSession } from 'next-auth/react';
 import { type Course } from '@/app/lib/courses-data';
 import { DEFAULT_FAQS, FAQ_STORAGE_KEY, type FaqItem } from '@/app/lib/faq-data';
 import { DEFAULT_HERO_IMAGE_URL, HERO_IMAGE_STORAGE_KEY } from '@/app/lib/hero-data';
@@ -86,7 +86,8 @@ const getInitialFaqItems = (): FaqItem[] => {
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { data: session } = useSession();
+  const user = session?.user;
   const [activePanel, setActivePanel] = useState<AdminPanel>('overview');
   const [chatMsgs, setChatMsgs] = useState<UserAdminChatMessage[]>(getInitialUserAdminChat);
   const [chatInput, setChatInput] = useState('');
@@ -193,10 +194,12 @@ export default function AdminDashboard() {
     const msg = chatInput.trim();
     if (!msg || !user) return;
 
+    const senderName = user.name ?? 'Admin User';
+
     const nextMessage: UserAdminChatMessage = {
       id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       senderRole: 'admin',
-      senderName: user.name,
+      senderName,
       text: msg,
       createdAt: Date.now(),
     };

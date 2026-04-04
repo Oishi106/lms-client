@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 
-import { useAuth } from "../../providers";
 import {
   getInitialUserAdminChat,
   saveUserAdminChat,
@@ -49,7 +49,8 @@ function SidebarLink({
 
 export default function DashboardShell() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { data: session } = useSession();
+  const user = session?.user;
 
   const [activePanel, setActivePanel] = useState<Panel>("ov");
   const [profileSaved, setProfileSaved] = useState(false);
@@ -116,6 +117,12 @@ export default function DashboardShell() {
 
   if (!user) return null;
 
+  const userName = user.name ?? "Learner";
+  const userEmail = user.email ?? "";
+  const userInitials = user.initials ?? "U";
+  const firstName = userName.split(" ")[0] ?? userName;
+  const lastName = userName.split(" ").slice(1).join(" ");
+
   function sendChatMsg() {
     const msg = chatInput.trim();
     if (!msg || !user) return;
@@ -123,7 +130,7 @@ export default function DashboardShell() {
     const nextMessage: UserAdminChatMessage = {
       id: `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       senderRole: "user",
-      senderName: user.name,
+      senderName: userName,
       text: msg,
       createdAt: Date.now(),
     };
@@ -133,7 +140,7 @@ export default function DashboardShell() {
     appendAdminNotification({
       type: "message",
       title: "New User Message",
-      description: `${user.name} sent a new support message.`,
+      description: `${userName} sent a new support message.`,
     });
     setChatInput("");
   }
@@ -545,13 +552,13 @@ export default function DashboardShell() {
                 className="profile-ava-big"
                 style={{ background: "var(--gold-dim)", color: "var(--gold)" }}
               >
-                {user.initials}
+                {userInitials}
               </div>
               <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 700 }}>
-                {user.name}
+                {userName}
               </div>
               <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20 }}>
-                {user.email}
+                {userEmail}
               </div>
               <button className="btn btn-ghost" style={{ width: "100%", fontSize: 13 }} type="button">
                 Change Photo
@@ -564,17 +571,17 @@ export default function DashboardShell() {
               <div className="form-row-2">
                 <div className="form-group">
                   <label className="form-label">First Name</label>
-                  <input className="input-field" defaultValue={user.name.split(" ")[0] ?? user.name} />
+                  <input className="input-field" defaultValue={firstName} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Last Name</label>
-                  <input className="input-field" defaultValue={user.name.split(" ").slice(1).join(" ")} />
+                  <input className="input-field" defaultValue={lastName} />
                 </div>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Email</label>
-                <input className="input-field" defaultValue={user.email} />
+                <input className="input-field" defaultValue={userEmail} />
               </div>
 
               <div className="form-group">

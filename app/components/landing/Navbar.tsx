@@ -3,20 +3,21 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
+import { signOut, useSession } from "next-auth/react";
 
-import { useAuth, useTheme } from "../../providers";
+import { useTheme } from "../../providers";
 
 export default function Navbar() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { data: session } = useSession();
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
     () => false
   );
 
-  const safeUser = mounted ? user : null;
+  const safeUser = mounted ? session?.user ?? null : null;
   const safeTheme = mounted ? theme : "dark";
 
   return (
@@ -94,9 +95,10 @@ export default function Navbar() {
                 <button
                   className="nav-dropdown-item"
                   type="button"
-                  onClick={() => {
-                    logout();
+                  onClick={async () => {
+                    await signOut({ redirect: false });
                     router.push("/");
+                    router.refresh();
                   }}
                   style={{ color: "var(--rose)", width: "100%" }}
                 >

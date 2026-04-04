@@ -1,28 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn, useSession } from "next-auth/react";
 
 import AuthShell from "./AuthShell";
-import { AuthUser, useAuth } from "../../providers";
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function toInitials(name: string) {
-  const cleaned = name.trim();
-  if (!cleaned) return "U";
-  const parts = cleaned.split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "U";
-  const second = (parts[1]?.[0] ?? parts[0]?.[1] ?? "").toString();
-  return (first + second).toUpperCase();
-}
-
 export default function LoginForm() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { status } = useSession();
 
   const [userType, setUserType] = useState<'user' | 'admin'>('user');
   const [email, setEmail] = useState("");
@@ -31,12 +22,55 @@ export default function LoginForm() {
 
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const canSubmit = useMemo(() => !submitting, [submitting]);
+  useEffect(() => {
+    if (status === "authenticated") {         
+      router.replace("/dashboard");
+    }
+  }, [status, router]);
 
-  function doLogin(next: AuthUser) {
-    login(next);
+  const canSubmit = useMemo(() => !submitting && status !== "loading", [submitting, status]);
+
+  async function doGoogleLogin() {
+    setSubmitting(true);
+    setAuthError(null);
+
+    const result = await signIn("google", {
+      redirect: false,
+      callbackUrl: "/dashboard",
+    });
+
+    if (result?.error) {
+      setAuthError("Google sign-in is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.");
+      setSubmitting(false);
+      return;
+    }
+
     router.push("/dashboard");
+    router.refresh();
+  }
+
+  async function doLogin(nextEmail: string, nextPassword: string, role: "user" | "admin") {
+    setSubmitting(true);
+    setAuthError(null);
+
+    const result = await signIn("credentials", {
+      email: nextEmail,
+      password: nextPassword,
+      role,
+      redirect: false,
+      callbackUrl: "/dashboard",
+    });
+
+    if (result?.error) {
+      setAuthError("Invalid credentials. Try demo credentials first.");
+      setSubmitting(false);
+      return;
+    }
+
+    router.push("/dashboard");
+    router.refresh();
   }
 
   return (
@@ -71,6 +105,7 @@ export default function LoginForm() {
             setPassword("123456");
             setEmailError(null);
             setPasswordError(null);
+            setAuthError(null);
           }}
         >
           Use demo credentials
@@ -82,15 +117,7 @@ export default function LoginForm() {
           <button
             className="social-auth-btn"
             type="button"
-            onClick={() => {
-              const next: AuthUser = {
-                name: "Google User",
-                email: "google@example.com",
-                initials: "GU",
-                role: "user",
-              };
-              doLogin(next);
-            }}
+            onClick={doGoogleLogin}
           >
             Continue with Google
           </button>
@@ -105,6 +132,7 @@ export default function LoginForm() {
       <div className={`success-banner ${submitting ? "show" : ""}`}>
         {userType === "admin" ? "Admin" : "Learner"} login successful.
       </div>
+      <div className={`error-text${authError ? " show" : ""}`}>{authError}</div>
 
       <div className="form-group">
         <label className="form-label">{userType === "admin" ? "Admin Email" : "Email Address"}</label>
@@ -138,9 +166,10 @@ export default function LoginForm() {
         className="btn btn-primary auth-submit"
         type="button"
         disabled={!canSubmit}
-        onClick={() => {
+        onClick={async () => {
           setEmailError(null);
           setPasswordError(null);
+          setAuthError(null);
 
           let ok = true;
           if (!isValidEmail(email)) {
@@ -153,18 +182,7 @@ export default function LoginForm() {
           }
           if (!ok) return;
 
-          setSubmitting(true);
-          window.setTimeout(() => {
-            const namePart = email.split("@")[0] ?? "User";
-            const displayName = namePart ? namePart[0].toUpperCase() + namePart.slice(1) : "User";
-
-            doLogin({
-              name: displayName,
-              email,
-              initials: toInitials(displayName),
-              role: userType,
-            });
-          }, 700);
+          await doLogin(email, password, userType);
         }}
       >
         {submitting ? "Signing in..." : userType === "admin" ? "Enter Admin Workspace" : "Enter Learning Space"}
