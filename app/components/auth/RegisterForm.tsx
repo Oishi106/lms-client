@@ -57,45 +57,53 @@ export default function RegisterForm() {
     setSubmitting(true);
     setAuthError(null);
 
-    const response = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        firstName,
-        lastName,
-        companyName,
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          companyName,
+          email,
+          password,
+          role: userType,
+        }),
+      });
+
+      const contentType = response.headers.get("content-type") ?? "";
+      const data = contentType.includes("application/json")
+        ? ((await response.json()) as { error?: string })
+        : { error: await response.text() };
+
+      if (!response.ok) {
+        setAuthError(data.error ?? "Unable to create account.");
+        return;
+      }
+
+      const signInResult = await signIn("credentials", {
         email,
         password,
         role: userType,
-      }),
-    });
+        redirect: false,
+        callbackUrl: "/dashboard",
+      });
 
-    const data = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      setAuthError(data.error ?? "Unable to create account.");
+      if (signInResult?.error) {
+        setAuthError("Account created, but automatic sign-in failed. Please login manually.");
+        router.push("/login");
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setAuthError("Unable to create account. Please try again.");
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    const signInResult = await signIn("credentials", {
-      email,
-      password,
-      role: userType,
-      redirect: false,
-      callbackUrl: "/dashboard",
-    });
-
-    if (signInResult?.error) {
-      setAuthError("Account created, but automatic sign-in failed. Please login manually.");
-      setSubmitting(false);
-      router.push("/login");
-      return;
-    }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (

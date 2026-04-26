@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { type Course } from '@/app/lib/courses-data';
@@ -101,6 +101,24 @@ export default function AdminDashboard() {
   const [managedCoursesStatus, setManagedCoursesStatus] = useState('');
   const [adminNotifications, setAdminNotifications] = useState<AdminNotification[]>(getAdminNotifications);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [loggedInUsers, setLoggedInUsers] = useState<
+    Array<{
+      id: string;
+      name: string;
+      email: string;
+      role: 'user' | 'admin';
+      authProvider: string;
+      initials: string;
+      lastLoginAt: string | null;
+      loginCount: number;
+      createdAt: string;
+    }>
+  >([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [expandedUsers, setExpandedUsers] = useState<Record<string, boolean>>({});
+  const [userHistories, setUserHistories] = useState<Record<string, string[]>>({});
+  const pollingTimersRef = useRef<Record<string, number>>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
   const prevUnreadNotificationsRef = useRef(0);
@@ -110,6 +128,100 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!user || user.role !== 'admin') router.replace('/dashboard');
   }, [user, router]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'admin') return;
+    if (activePanel !== 'users') return;
+
+    const controller = new AbortController();
+    setUsersLoading(true);
+    setUsersError(null);
+
+    fetch('/api/admin/users', { signal: controller.signal })
+      .then(async (res) => {
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch (e) {
+          // ignore parse errors
+        }
+
+        if (!res.ok) {
+          const msg = data && data.error ? data.error : `Server returned ${res.status}`;
+          throw new Error(msg);
+        }
+
+        // Support multiple response shapes:
+        // - { ok: true, users: [...] }
+        // - { users: [...] }
+        // - [...] (array directly)
+        let usersList: typeof loggedInUsers = [];
+        if (Array.isArray(data)) usersList = data;
+        else if (data && Array.isArray(data.users)) usersList = data.users;
+
+        setLoggedInUsers(usersList);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setUsersError(err instanceof Error ? err.message : 'Unable to load users.');
+      })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        setUsersLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [activePanel, user]);
+
+  // Poll login history for expanded users
+  useEffect(() => {
+    const startPolling = (userId: string) => {
+      // immediate fetch
+      fetchHistory(userId);
+      if (pollingTimersRef.current[userId]) return;
+      const id = window.setInterval(() => fetchHistory(userId), 5000);
+      pollingTimersRef.current[userId] = id as unknown as number;
+    };
+
+    const stopPolling = (userId: string) => {
+      const id = pollingTimersRef.current[userId];
+      if (id) {
+        clearInterval(id);
+        delete pollingTimersRef.current[userId];
+      }
+    };
+
+    const expandedIds = Object.keys(expandedUsers).filter((k) => expandedUsers[k]);
+
+    // start polling for newly expanded
+    for (const id of expandedIds) {
+      startPolling(id);
+    }
+
+    // stop polling for collapsed
+    const tracked = Object.keys(pollingTimersRef.current);
+    for (const id of tracked) {
+      if (!expandedIds.includes(id)) stopPolling(id);
+    }
+
+    return () => {
+      // cleanup all timers
+      const trackedNow = Object.keys(pollingTimersRef.current);
+      for (const id of trackedNow) stopPolling(id);
+    };
+  }, [expandedUsers]);
+
+  const fetchHistory = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/history`);
+      const data = await res.json();
+      if (res.ok && data && Array.isArray(data.events)) {
+        setUserHistories((prev) => ({ ...prev, [userId]: data.events }));
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -841,6 +953,133 @@ export default function AdminDashboard() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* Users */}
+        {activePanel === 'users' && (
+          <div>
+            <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '18px' }}>
+              Users (Logged In)
+            </h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '18px' }}>
+              Shows accounts that have logged in at least once.
+            </p>
+
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '18px' }}>
+              {usersError ? (
+                <div style={{ color: 'var(--rose)', fontSize: '13px' }}>{usersError}</div>
+              ) : null}
+
+              {usersLoading ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Loading users…</div>
+              ) : loggedInUsers.length === 0 ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No user logins recorded yet.</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Name</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Email</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Role</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Provider</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Logins</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Last Login</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loggedInUsers.map((u, i) => {
+                      const last = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—';
+                      const isExpanded = Boolean(expandedUsers[u.id]);
+
+                      return [
+                        <tr
+                          key={`row-${u.id}`}
+                          style={{ borderBottom: i < loggedInUsers.length - 1 ? '1px solid var(--border-default)' : 'none', transition: 'all 0.2s ease' }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'var(--gold-dim)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <td style={{ padding: '10px 12px', fontSize: '14px', color: 'var(--text-primary)', fontWeight: '600' }}>{u.name}</td>
+                          <td style={{ padding: '10px 12px', fontSize: '14px', color: 'var(--text-secondary)' }}>{u.email}</td>
+                          <td style={{ padding: '10px 12px', fontSize: '13px', color: u.role === 'admin' ? 'var(--gold)' : 'var(--text-secondary)', fontWeight: '700' }}>{u.role.toUpperCase()}</td>
+                          <td style={{ padding: '10px 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>{u.authProvider}</td>
+                          <td style={{ padding: '10px 12px', fontSize: '14px', color: 'var(--text-secondary)' }}>{u.loginCount}</td>
+                          <td
+                            title={Array.isArray((u as any).lastLogins) && (u as any).lastLogins.length > 0 ? (u as any).lastLogins.join('\n') : undefined}
+                            style={{ padding: '10px 12px', fontSize: '13px', color: 'var(--text-secondary)' }}
+                          >
+                            {last}
+                          </td>
+                          <td style={{ padding: '10px 12px', display: 'flex', gap: '8px' }}>
+                            <button
+                              onClick={() => setExpandedUsers((prev) => ({ ...prev, [u.id]: !prev[u.id] }))}
+                              style={{
+                                background: 'transparent',
+                                border: '1px solid var(--border-default)',
+                                color: 'var(--text-secondary)',
+                                borderRadius: '8px',
+                                padding: '5px 10px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {isExpanded ? 'Hide history' : 'Show history'}
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Delete ${u.name}?`)) return;
+                                const res = await fetch('/api/admin/users', {
+                                  method: 'DELETE',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ userId: u.id }),
+                                });
+                                const data = await res.json();
+                                if (data.ok) {
+                                  setLoggedInUsers((prev) => prev.filter((x) => x.id !== u.id));
+                                }
+                              }}
+                              style={{
+                                background: 'transparent',
+                                border: '1px solid #f43f5e',
+                                color: '#f43f5e',
+                                borderRadius: '8px',
+                                padding: '5px 10px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>,
+                        isExpanded && (
+                          <tr key={`expand-${u.id}`} style={{ background: 'var(--bg-card-alt)', borderBottom: i < loggedInUsers.length - 1 ? '1px solid var(--border-default)' : 'none' }}>
+                            <td colSpan={7} style={{ padding: '10px 14px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                              <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                                {Array.isArray(userHistories[u.id]) && userHistories[u.id].length > 0 ? (
+                                  <ul style={{ margin: 0, paddingLeft: '18px' }}>
+                                    {userHistories[u.id].map((ts: string, idx: number) => (
+                                      <li key={idx} style={{ marginBottom: '6px' }}>{new Date(ts).toLocaleString()}</li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div style={{ color: 'var(--text-secondary)' }}>Loading history…</div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ),
+                      ];
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         )}

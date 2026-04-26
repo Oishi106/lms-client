@@ -55,22 +55,29 @@ export default function LoginForm() {
     setSubmitting(true);
     setAuthError(null);
 
-    const result = await signIn("credentials", {
-      email: nextEmail,
-      password: nextPassword,
-      role,
-      redirect: false,
-      callbackUrl: "/dashboard",
-    });
+    try {
+      const result = await signIn("credentials", {
+        email: nextEmail,
+        password: nextPassword,
+        role,
+        redirect: false,
+        callbackUrl: "/dashboard",
+      });
 
-    if (result?.error) {
-      setAuthError("Invalid credentials. Try demo credentials first.");
+      if (result?.error) {
+        setAuthError(
+          role === "admin"
+            ? "Invalid admin credentials, or this account is not an admin."
+            : "Invalid email or password."
+        );
+        return;
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } finally {
       setSubmitting(false);
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
   }
 
   return (
@@ -96,22 +103,6 @@ export default function LoginForm() {
         </button>
       </div>
 
-      <div className="demo-row">
-        <button
-          className="demo-btn-item"
-          type="button"
-          onClick={() => {
-            setEmail(userType === "admin" ? "admin@example.com" : "user@example.com");
-            setPassword("123456");
-            setEmailError(null);
-            setPasswordError(null);
-            setAuthError(null);
-          }}
-        >
-          Use demo credentials
-        </button>
-      </div>
-
       {userType === "user" && (
         <div className="social-auth">
           <button
@@ -129,9 +120,7 @@ export default function LoginForm() {
 
       <div className="or-line">or continue with email</div>
 
-      <div className={`success-banner ${submitting ? "show" : ""}`}>
-        {userType === "admin" ? "Admin" : "Learner"} login successful.
-      </div>
+      <div className="success-banner" />
       <div className={`error-text${authError ? " show" : ""}`}>{authError}</div>
 
       <div className="form-group">

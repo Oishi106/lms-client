@@ -3,6 +3,8 @@
 import Navbar from "../components/landing/Navbar";
 import Link from "next/link";
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { COURSES, FILTER_CATEGORIES, FILTER_LEVELS } from "../lib/courses-data";
 import { getManagedCoursesClient, getDefaultManagedCourses, subscribeManagedCourses } from "@/app/lib/managed-courses-data";
 
@@ -49,6 +51,17 @@ export default function ExplorePage() {
   const [appliedRatings, setAppliedRatings] = useState<number[]>([]);
   const [appliedMaxPrice, setAppliedMaxPrice] = useState(200);
   const [appliedSortBy, setAppliedSortBy] = useState<SortOption>("popular");
+
+  const router = useRouter();
+  const { data: session, status } = useSession();
+
+  const handleView = (id: string) => {
+    if (status !== "authenticated") {
+      router.push("/login");
+      return;
+    }
+    router.push(`/course/${id}`);
+  };
 
   const toggleInList = <T,>(list: T[], value: T) =>
     list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -244,7 +257,7 @@ export default function ExplorePage() {
 
               <div className="course-grid-3">
                 {filteredCourses.map((c) => (
-                  <Link key={c.id} href={`/course/${c.id}`}>
+                  <div key={c.id}>
                     <article className="course-card" data-accent={c.accent}>
                       <div className="course-cover">
                         <div className="course-level">{c.level}</div>
@@ -291,13 +304,17 @@ export default function ExplorePage() {
                             <span className="course-price-now">{c.price}</span>
                             <span className="course-price-old">{c.oldPrice}</span>
                           </div>
-                          <button className="course-view" type="button">
+                          <button
+                            className="course-view"
+                            type="button"
+                            onClick={() => handleView(c.id)}
+                          >
                             View →
                           </button>
                         </div>
                       </div>
                     </article>
-                  </Link>
+                  </div>
                 ))}
               </div>
 

@@ -19,6 +19,11 @@ Generate a secure secret (example):
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
+Notes:
+
+- In `.env` files, `#` starts a comment unless the value is quoted. Prefer a hex secret, or wrap the value in quotes.
+- If you change `NEXTAUTH_SECRET`, clear site cookies for `localhost:3000` once (old NextAuth session cookies can’t be decrypted).
+
 ## 2) Run App
 
 ```bash
@@ -37,11 +42,14 @@ Open http://localhost:3000.
 - Protected routes: `/dashboard/*`, `/checkout/*` via `middleware.ts`
 - Session strategy: JWT
 
-### Demo Credentials
+### Admin Bootstrapping
 
-- Learner: `user@example.com` / `123456`
-- Admin: `admin@example.com` / `123456`
-- Google: requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
+- The very first account that registers (in an empty DB) is automatically created as `admin`.
+- After that, public signup cannot create new admins; an existing admin must promote users (not implemented yet).
+
+### MongoDB
+
+- All auth data is stored in MongoDB via `MONGODB_URI`.
 
 ## 4) Important Auth Files
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ENROLLED_COURSES_STORAGE_KEY,
   PAYMENTS_UPDATED_EVENT,
@@ -12,6 +12,7 @@ import {
   COURSE_VIDEO_UPDATED_EVENT,
   getStoredCourseVideoMap,
 } from "@/app/lib/course-video-data";
+import { getManagedCoursesClient } from "@/app/lib/managed-courses-data";
 
 interface CourseVideoPlayerProps {
   courseId: string;
@@ -39,10 +40,9 @@ export default function CourseVideoPlayer({
   videoUrl,
   previewSeconds = 300,
 }: CourseVideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [purchased, setPurchased] = useState(false);
-  const [hitPreviewLimit, setHitPreviewLimit] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState(videoUrl);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const applyVideoOverride = () => {
@@ -66,10 +66,7 @@ export default function CourseVideoPlayer({
   }, [courseId, videoUrl]);
 
   useEffect(() => {
-    const refreshAccess = () => {
-      setPurchased(hasPurchasedCourse(courseId));
-      setHitPreviewLimit(false);
-    };
+    const refreshAccess = () => setPurchased(hasPurchasedCourse(courseId));
 
     refreshAccess();
 
@@ -86,11 +83,7 @@ export default function CourseVideoPlayer({
     };
   }, [courseId]);
 
-  const subtitle = useMemo(() => {
-    if (purchased) return "Full course video unlocked. Enjoy complete access.";
-    const minutes = Math.floor(previewSeconds / 60);
-    return `Preview mode: first ${minutes} minute${minutes === 1 ? "" : "s"} only. Complete payment to watch full video.`;
-  }, [purchased, previewSeconds]);
+  const subtitle = useMemo(() => (purchased ? "Full course video unlocked. Enjoy complete access." : "This video is locked. Purchase the course to unlock full access."), [purchased]);
 
   const youtubeId = useMemo(() => getYoutubeVideoId(activeVideoUrl), [activeVideoUrl]);
   const youtubeEmbedUrl = useMemo(() => {
@@ -98,23 +91,8 @@ export default function CourseVideoPlayer({
 
     const base = `https://www.youtube-nocookie.com/embed/${youtubeId}`;
     const params = new URLSearchParams({ rel: "0", modestbranding: "1" });
-    if (!purchased) {
-      params.set("start", "0");
-      params.set("end", String(previewSeconds));
-    }
-
     return `${base}?${params.toString()}`;
   }, [youtubeId, purchased, previewSeconds]);
-
-  const onTimeUpdate = () => {
-    if (purchased || !videoRef.current) return;
-
-    if (videoRef.current.currentTime >= previewSeconds) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-      setHitPreviewLimit(true);
-    }
-  };
 
   return (
     <section
@@ -141,36 +119,62 @@ export default function CourseVideoPlayer({
           background: "#000",
         }}
       >
-        {youtubeId ? (
-          <iframe
-            title="Course video"
-            src={youtubeEmbedUrl}
-            style={{ width: "100%", height: "460px", border: "0", display: "block" }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            referrerPolicy="strict-origin-when-cross-origin"
-            allowFullScreen
-          />
+        {purchased ? (
+          youtubeId ? (
+            <iframe
+              title="Course video"
+              src={youtubeEmbedUrl}
+              style={{ width: "100%", height: "460px", border: "0", display: "block" }}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerPolicy="strict-origin-when-cross-origin"
+              allowFullScreen
+            />
+          ) : (
+            <video src={activeVideoUrl} controls style={{ width: "100%", display: "block", maxHeight: "460px" }} />
+          )
         ) : (
-          <video
-            ref={videoRef}
-            src={activeVideoUrl}
-            controls
-            onTimeUpdate={onTimeUpdate}
-            style={{ width: "100%", display: "block", maxHeight: "460px" }}
-          />
+          <div style={{ width: "100%", height: 460, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", background: "linear-gradient(90deg, rgba(0,0,0,0.7), rgba(0,0,0,0.9))" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Video Locked</div>
+              <div style={{ color: "var(--text-secondary)", marginBottom: 12 }}>Purchase the course to access full videos.</div>
+              <button className="btn btn-primary" onClick={async () => {
+                if (loading) return;
+                try {
+                  setLoading(true);
+                  // find course info to send price/title
+                  const managed = getManagedCoursesClient();
+                  const course = managed.find((c) => c.id === courseId);
+                  const price = course?.price || "0";
+                  const parsedPrice = parseFloat(String(price).replace(/[^0-9.]/g, "")) || 0;
+
+                  const res = await fetch('/api/checkout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ courseId, courseName: course?.title || 'Course Enrollment', price: parsedPrice })
+                  });
+
+                  const data = await res.json();
+                  if (data?.url) {
+                    window.location.assign(data.url);
+                  } else {
+                    console.error('Checkout failed', data);
+                    alert('Unable to start checkout.');
+                  }
+                } catch (err) {
+                  console.error(err);
+                  alert('Payment failed.');
+                } finally {
+                  setLoading(false);
+                }
+              }}>
+                {loading ? 'Processing...' : 'Enroll Now'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
-      {!purchased && (
-        <div style={{ marginTop: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-          <span style={{ color: "var(--gold)", fontSize: "13px", fontWeight: 600 }}>
-            {hitPreviewLimit ? "Preview ended. Unlock full video by enrolling." : "Preview active"}
-          </span>
-          <Link className="btn btn-primary" href={`/checkout/${courseId}`}>
-            Unlock Full Video
-          </Link>
-        </div>
-      )}
+      {/* No preview UI — videos are locked until purchase */}
     </section>
   );
 }

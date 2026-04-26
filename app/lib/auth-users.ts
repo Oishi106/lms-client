@@ -1,3 +1,9 @@
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
+
+import { connectMongoose } from "@/app/lib/mongoose";
+import { UserModel } from "@/app/lib/models/User";
+
 export type AppRole = "user" | "admin";
 
 export type AppUserRecord = {
@@ -14,31 +20,11 @@ type PublicAppUser = Omit<AppUserRecord, "password">;
 type RegisterPayload = {
   firstName: string;
   lastName?: string;
+  companyName?: string;
   email: string;
   password: string;
   role?: AppRole;
 };
-
-const DEMO_USERS: AppUserRecord[] = [
-  {
-    id: "demo-user-1",
-    name: "Demo Learner",
-    email: "user@example.com",
-    password: "123456",
-    role: "user",
-    initials: "DL",
-  },
-  {
-    id: "demo-admin-1",
-    name: "Demo Admin",
-    email: "admin@example.com",
-    password: "123456",
-    role: "admin",
-    initials: "DA",
-  },
-];
-
-const USER_STORE_KEY = "__skillforge_auth_users__";
 
 function toInitials(name: string): string {
   const cleaned = name.trim();
@@ -58,25 +44,12 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function getUserStore(): Map<string, AppUserRecord> {
-  const globalRef = globalThis as typeof globalThis & {
-    [USER_STORE_KEY]?: Map<string, AppUserRecord>;
-  };
-
-  if (!globalRef[USER_STORE_KEY]) {
-    const map = new Map<string, AppUserRecord>();
-    DEMO_USERS.forEach((user) => {
-      map.set(normalizeEmail(user.email), user);
-    });
-    globalRef[USER_STORE_KEY] = map;
-  }
-
-  return globalRef[USER_STORE_KEY];
-}
-
-function toPublicUser(user: AppUserRecord): PublicAppUser {
+export async function getPublicUserByEmail(email: string): Promise<PublicAppUser | null> {
+  await connectMongoose();
+  const user = await UserModel.findOne({ email: normalizeEmail(email) }).lean();
+  if (!user) return null;
   return {
-    id: user.id,
+    id: (user as unknown as { _id: { toString(): string } })._id.toString(),
     name: user.name,
     email: user.email,
     role: user.role,
@@ -84,30 +57,77 @@ function toPublicUser(user: AppUserRecord): PublicAppUser {
   };
 }
 
-export function getPublicUserByEmail(email: string): PublicAppUser | null {
-  const user = getUserStore().get(normalizeEmail(email));
-  return user ? toPublicUser(user) : null;
-}
-
-export function verifyUserCredentials(email: string, password: string, role?: AppRole): PublicAppUser | null {
-  const user = getUserStore().get(normalizeEmail(email));
+export async function verifyUserCredentials(email: string, password: string, role?: AppRole): Promise<PublicAppUser | null> {
+  const normalized = normalizeEmail(email);
+  await connectMongoose();
+  const user = await UserModel.findOne({ email: normalized }).lean();
   if (!user) return null;
-  if (user.password !== password) return null;
+  if (!user.passwordHash) return null;
   if (role && user.role !== role) return null;
-  return toPublicUser(user);
+
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return null;
+
+  return {
+    id: (user as unknown as { _id: { toString(): string } })._id.toString(),
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    initials: user.initials,
+  };
 }
 
-export function registerUser(payload: RegisterPayload):
-  | { ok: true; user: PublicAppUser }
-  | { ok: false; message: string } {
+export async function upsertOAuthUser(input: {
+  name?: string | null;
+  email?: string | null;
+  role?: AppRole;
+}): Promise<PublicAppUser | null> {
+  const email = input.email ? normalizeEmail(input.email) : "";
+  const name = (input.name ?? "").trim();
+  if (!email || !name) return null;
+
+  await connectMongoose();
+
+  const existing = await UserModel.findOne({ email }).lean();
+  if (existing) {
+    return {
+      id: (existing as unknown as { _id: { toString(): string } })._id.toString(),
+      name: existing.name,
+      email: existing.email,
+      role: existing.role,
+      initials: existing.initials,
+    };
+  }
+
+  const passwordSeed = crypto.randomBytes(32).toString("hex");
+  const passwordHash = await bcrypt.hash(passwordSeed, 10);
+  const initials = toInitials(name);
+  const role: AppRole = input.role ?? "user";
+
+  const created = await UserModel.create({
+    name,
+    email,
+    passwordHash,
+    role,
+    initials,
+    authProvider: "google",
+  });
+
+  return {
+    id: created._id.toString(),
+    name: created.name,
+    email: created.email,
+    role: created.role,
+    initials: created.initials,
+  };
+}
+
+export async function registerUser(
+  payload: RegisterPayload
+): Promise<{ ok: true; user: PublicAppUser } | { ok: false; message: string }> {
   const email = normalizeEmail(payload.email);
   if (!email) return { ok: false, message: "Email is required." };
   if (payload.password.length < 6) return { ok: false, message: "Password must be at least 6 characters." };
-
-  const store = getUserStore();
-  if (store.has(email)) {
-    return { ok: false, message: "An account already exists with this email." };
-  }
 
   const firstName = payload.firstName.trim();
   const lastName = (payload.lastName ?? "").trim();
@@ -117,15 +137,60 @@ export function registerUser(payload: RegisterPayload):
     return { ok: false, message: "Name is required." };
   }
 
-  const nextUser: AppUserRecord = {
-    id: `usr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: fullName,
-    email,
-    password: payload.password,
-    role: payload.role ?? "user",
-    initials: toInitials(fullName),
-  };
+  await connectMongoose();
 
-  store.set(email, nextUser);
-  return { ok: true, user: toPublicUser(nextUser) };
+  const existing = await UserModel.findOne({ email }).lean();
+  if (existing) {
+    return { ok: false, message: "An account already exists with this email." };
+  }
+
+  const userCount = await UserModel.countDocuments();
+  const adminCount = await UserModel.countDocuments({ role: "admin" });
+
+  const isFirstUser = userCount === 0;
+  const hasAnyAdmin = adminCount > 0;
+
+  // Real-life rule:
+  // - First ever registered account becomes admin.
+  // - If users exist but no admin exists yet, allow creating the first admin.
+  // - Once an admin exists, admin registration is not allowed via public signup.
+  const requestedRole: AppRole = payload.role ?? "user";
+  const role: AppRole = isFirstUser ? "admin" : requestedRole;
+
+  if (hasAnyAdmin && requestedRole === "admin") {
+    return { ok: false, message: "Admin registration is disabled. Ask an existing admin to promote your account." };
+  }
+
+  const passwordHash = await bcrypt.hash(payload.password, 10);
+  const initials = toInitials(fullName);
+
+  try {
+    const created = await UserModel.create({
+      name: fullName,
+      email,
+      passwordHash,
+      role,
+      initials,
+      companyName: payload.companyName?.trim() || undefined,
+      authProvider: "credentials",
+    });
+
+    return {
+      ok: true,
+      user: {
+        id: created._id.toString(),
+        name: created.name,
+        email: created.email,
+        role: created.role,
+        initials: created.initials,
+      },
+    };
+  } catch (err) {
+    const isDuplicate =
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      (err as { code?: number }).code === 11000;
+    return { ok: false, message: isDuplicate ? "An account already exists with this email." : "Unable to create account." };
+  }
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { registerUser, type AppRole } from "@/app/lib/auth-users";
+import { registerUser } from "@/app/lib/auth-users";
 
 type RegisterBody = {
   firstName?: string;
@@ -8,7 +8,7 @@ type RegisterBody = {
   companyName?: string;
   email?: string;
   password?: string;
-  role?: AppRole;
+  role?: "user" | "admin";
 };
 
 function isEmailValid(email: string) {
@@ -28,42 +28,32 @@ export async function POST(request: Request) {
     if (!firstName) {
       return NextResponse.json({ error: "First name is required." }, { status: 400 });
     }
-
     if (!isEmailValid(email)) {
       return NextResponse.json({ error: "Please provide a valid email." }, { status: 400 });
     }
-
     if (password.length < 6) {
       return NextResponse.json({ error: "Password must be at least 6 characters." }, { status: 400 });
     }
 
-    if (role === "admin" && !companyName) {
-      return NextResponse.json({ error: "Organization name is required for admin accounts." }, { status: 400 });
-    }
+    const name = [firstName, lastName].filter(Boolean).join(" ");
+    void name;
 
-    const result = registerUser({
+    const result = await registerUser({
       firstName,
       lastName,
+      companyName,
       email,
       password,
       role,
     });
 
     if (!result.ok) {
-      return NextResponse.json({ error: result.message }, { status: 409 });
+      return NextResponse.json({ error: result.message }, { status: 400 });
     }
 
-    return NextResponse.json({
-      ok: true,
-      user: {
-        id: result.user.id,
-        name: result.user.name,
-        email: result.user.email,
-        role: result.user.role,
-        initials: result.user.initials,
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "Unable to create account." }, { status: 500 });
+    return NextResponse.json({ ok: true, user: result.user });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unable to create account.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
