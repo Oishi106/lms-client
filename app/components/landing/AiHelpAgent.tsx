@@ -14,7 +14,7 @@ const defaultGreeting: UiMessage = {
   id: "welcome",
   role: "assistant",
   content:
-    "Hi, I am SkillForge AI Help. Ask me anything about learning, coding, interview prep, or platform usage.",
+    "Hi! I am SkillForge AI Assistant powered by Gemini. Ask me anything about learning paths, courses, coding, interview prep, or career advice! 🚀",
 };
 
 const getInitialMessages = (): UiMessage[] => {
@@ -41,6 +41,14 @@ const getInitialMessages = (): UiMessage[] => {
   }
 };
 
+const SUGGESTIONS = [
+  "What courses should I start with?",
+  "How do I become a web developer?",
+  "Give me a Python learning roadmap",
+  "How to prepare for interviews?",
+  "What is the best way to learn React?",
+];
+
 export default function AiHelpAgent() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<UiMessage[]>(getInitialMessages);
@@ -62,8 +70,8 @@ export default function AiHelpAgent() {
     [messages]
   );
 
-  const sendMessage = async () => {
-    const question = input.trim();
+  const sendMessage = async (overrideText?: string) => {
+    const question = (overrideText ?? input).trim();
     if (!question || loading) return;
 
     const userMessage: UiMessage = {
@@ -77,19 +85,18 @@ export default function AiHelpAgent() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/ai-help", {
+      const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: question,
-          history: requestPayloadHistory,
+          messages: [...requestPayloadHistory, { role: "user", content: question }],
         }),
       });
 
-      const data = (await response.json()) as { reply?: string };
-      const reply = data.reply?.trim() || "I could not generate a response. Please try again.";
+      const data = (await response.json()) as { ok: boolean; message?: string; error?: string };
+      const reply = data.message?.trim() || "I could not generate a response. Please try again.";
 
       const assistantMessage: UiMessage = {
         id: `a-${Date.now()}`,
@@ -115,6 +122,8 @@ export default function AiHelpAgent() {
     setMessages([defaultGreeting]);
   };
 
+  const showSuggestions = messages.length <= 1;
+
   return (
     <>
       <button
@@ -136,9 +145,12 @@ export default function AiHelpAgent() {
           cursor: "pointer",
           boxShadow: "0 14px 34px rgba(245, 158, 11, 0.35)",
           zIndex: 2001,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        AI
+        {isOpen ? "✕" : "AI"}
       </button>
 
       {isOpen && (
@@ -159,6 +171,7 @@ export default function AiHelpAgent() {
             overflow: "hidden",
           }}
         >
+          {/* Header */}
           <div
             style={{
               padding: "12px 14px",
@@ -169,9 +182,16 @@ export default function AiHelpAgent() {
               background: "linear-gradient(90deg, var(--gold-dim), rgba(245, 158, 11, 0.08))",
             }}
           >
-            <div>
-              <div style={{ fontWeight: 800, color: "var(--text-primary)", fontSize: 14 }}>AI Help Agent</div>
-              <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>Public assistant for all visitors</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 20 }}>✨</div>
+              <div>
+                <div style={{ fontWeight: 800, color: "var(--text-primary)", fontSize: 14 }}>
+                  SkillForge AI
+                </div>
+                <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
+                  Powered by Google Gemini
+                </div>
+              </div>
             </div>
             <button
               type="button"
@@ -190,7 +210,17 @@ export default function AiHelpAgent() {
             </button>
           </div>
 
-          <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Messages */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
             {messages.map((item) => (
               <div
                 key={item.id}
@@ -198,37 +228,93 @@ export default function AiHelpAgent() {
                   alignSelf: item.role === "user" ? "flex-end" : "flex-start",
                   maxWidth: "88%",
                   borderRadius: 10,
-                  padding: "9px 10px",
+                  padding: "9px 12px",
                   fontSize: 13,
-                  lineHeight: 1.45,
+                  lineHeight: 1.55,
                   whiteSpace: "pre-wrap",
                   background: item.role === "user" ? "var(--gold)" : "var(--bg-card-alt)",
                   color: item.role === "user" ? "var(--text-inverse)" : "var(--text-primary)",
                   border: item.role === "user" ? "none" : "1px solid var(--border-default)",
                 }}
               >
+                {item.role === "assistant" && (
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--gold)", marginBottom: 4 }}>
+                    SkillForge AI ✨
+                  </div>
+                )}
                 {item.content}
               </div>
             ))}
+
+            {/* Suggestions */}
+            {showSuggestions && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
+                  Try asking:
+                </div>
+                {SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => void sendMessage(suggestion)}
+                    style={{
+                      background: "transparent",
+                      border: "1px solid var(--border-default)",
+                      borderRadius: 8,
+                      padding: "7px 10px",
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "var(--gold-dim)";
+                      e.currentTarget.style.color = "var(--gold)";
+                      e.currentTarget.style.borderColor = "var(--gold)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.color = "var(--text-secondary)";
+                      e.currentTarget.style.borderColor = "var(--border-default)";
+                    }}
+                  >
+                    💡 {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {loading && (
               <div
                 style={{
                   alignSelf: "flex-start",
                   borderRadius: 10,
-                  padding: "9px 10px",
+                  padding: "9px 12px",
                   fontSize: 13,
                   background: "var(--bg-card-alt)",
                   color: "var(--text-secondary)",
                   border: "1px solid var(--border-default)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                 }}
               >
-                Thinking...
+                <span style={{ animation: "pulse 1s infinite" }}>✨</span> Thinking...
               </div>
             )}
             <div ref={endRef} />
           </div>
 
-          <div style={{ borderTop: "1px solid var(--border-default)", padding: 10, display: "flex", gap: 8 }}>
+          {/* Input */}
+          <div
+            style={{
+              borderTop: "1px solid var(--border-default)",
+              padding: 10,
+              display: "flex",
+              gap: 8,
+            }}
+          >
             <input
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -238,7 +324,7 @@ export default function AiHelpAgent() {
                   void sendMessage();
                 }
               }}
-              placeholder="Ask anything..."
+              placeholder="Ask anything about learning..."
               style={{
                 flex: 1,
                 borderRadius: 8,
@@ -257,16 +343,16 @@ export default function AiHelpAgent() {
               style={{
                 borderRadius: 8,
                 border: "none",
-                background: "var(--gold)",
+                background: loading ? "var(--border-default)" : "var(--gold)",
                 color: "var(--text-inverse)",
                 fontSize: 13,
                 fontWeight: 700,
                 padding: "0 14px",
                 cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.7 : 1,
+                transition: "all 0.2s ease",
               }}
             >
-              Send
+              {loading ? "..." : "Send"}
             </button>
           </div>
         </div>

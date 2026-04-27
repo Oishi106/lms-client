@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { type Course } from '@/app/lib/courses-data';
@@ -9,7 +9,10 @@ import { DEFAULT_HERO_IMAGE_URL, HERO_IMAGE_STORAGE_KEY } from '@/app/lib/hero-d
 import { CATEGORIES_STORAGE_KEY, DEFAULT_CATEGORIES, type CategoryItem } from '@/app/lib/categories-data';
 import { getInitialUserAdminChat, saveUserAdminChat, subscribeUserAdminChat, type UserAdminChatMessage } from '@/app/lib/user-admin-chat';
 import { getDefaultManagedCourses, getManagedCoursesClient, resetManagedCourses, saveManagedCourses } from '@/app/lib/managed-courses-data';
-import { clearAllAdminNotifications, deleteAdminNotification, getAdminNotifications, markAllAdminNotificationsRead, subscribeAdminNotifications, type AdminNotification } from '@/app/lib/admin-notifications';
+import { clearAllAdminNotifications, deleteAdminNotification, getAdminNotifications, markAllAdminNotificationsRead, subscribeAdminNotifications, appendAdminNotification, type AdminNotification } from '@/app/lib/admin-notifications';
+import { appendUserNotification } from '@/app/lib/user-notifications';
+import { PAYMENTS_UPDATED_EVENT, getPaidOrders, type CourseOrder } from '@/app/lib/payments-data';
+import { REVIEW_STORAGE_KEY, REVIEW_UPDATED_EVENT, getStoredReviews } from '@/app/lib/review-data';
 
 type AdminPanel = 'overview' | 'users' | 'invoices' | 'create-course' | 'live-courses' | 'hero' | 'faq' | 'categories' | 'manage-team' | 'courses-analytics' | 'ai-chat';
 
@@ -31,6 +34,68 @@ const blankCourse = (): Course => ({
   videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
   previewSeconds: 300,
 });
+
+type CourseDraft = {
+  title: string;
+  id: string;
+  icon: string;
+  tag: string;
+  level: Course['level'];
+  accent: Course['accent'];
+  duration: string;
+  price: string;
+  oldPrice: string;
+  byline: string;
+  videoUrl: string;
+  description: string;
+};
+
+const blankCourseDraft = (): CourseDraft => ({
+  title: '',
+  id: '',
+  icon: '📘',
+  tag: 'Development',
+  level: 'BEGINNER',
+  accent: 'gold',
+  duration: '12h',
+  price: '$49',
+  oldPrice: '$99',
+  byline: 'by SkillForge Instructor',
+  videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  description: '',
+});
+
+const normalizeCourseId = (title: string): string =>
+  title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-') || `course-${Date.now()}`;
+
+const parseMoneyValue = (value: string): number => {
+  const normalized = value.replace(/[^0-9.]/g, '');
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatRelativeTime = (timestamp: number): string => {
+  const diffMs = Date.now() - timestamp;
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+};
+
+const getMonthKey = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+const getMonthLabel = (year: number, monthIndex: number): string =>
+  new Date(year, monthIndex, 1).toLocaleString('en-US', { month: 'short' });
 
 const getInitialCategories = (): CategoryItem[] => {
   if (typeof window === 'undefined') return DEFAULT_CATEGORIES;
@@ -99,6 +164,8 @@ export default function AdminDashboard() {
   const [categoriesStatus, setCategoriesStatus] = useState('');
   const [managedCourses, setManagedCourses] = useState<Course[]>(getManagedCoursesClient);
   const [managedCoursesStatus, setManagedCoursesStatus] = useState('');
+  const [courseDraft, setCourseDraft] = useState<CourseDraft>(blankCourseDraft);
+  const [courseDraftStatus, setCourseDraftStatus] = useState('');
   const [adminNotifications, setAdminNotifications] = useState<AdminNotification[]>(getAdminNotifications);
   const [showNotifications, setShowNotifications] = useState(false);
   const [loggedInUsers, setLoggedInUsers] = useState<
@@ -112,12 +179,20 @@ export default function AdminDashboard() {
       lastLoginAt: string | null;
       loginCount: number;
       createdAt: string;
+      lastLogins?: string[];
     }>
   >([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
   const [expandedUsers, setExpandedUsers] = useState<Record<string, boolean>>({});
   const [userHistories, setUserHistories] = useState<Record<string, string[]>>({});
+  const [orders, setOrders] = useState<CourseOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [teamStatus, setTeamStatus] = useState('');
+  const [meetingRoom, setMeetingRoom] = useState<string | null>(null);
+  const [meetingOrder, setMeetingOrder] = useState<null | { id: string; buyerEmail: string; buyerName: string; courseTitle: string }>(null);
+    const [reviewTick, setReviewTick] = useState(0);
   const pollingTimersRef = useRef<Record<string, number>>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
   const notificationPanelRef = useRef<HTMLDivElement>(null);
@@ -131,23 +206,27 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (!user || user.role !== 'admin') return;
-    if (activePanel !== 'users') return;
+    if (activePanel !== 'users' && activePanel !== 'manage-team' && activePanel !== 'overview') return;
 
     const controller = new AbortController();
-    setUsersLoading(true);
-    setUsersError(null);
+    const loadUsers = async () => {
+      setUsersLoading(true);
+      setUsersError(null);
 
-    fetch('/api/admin/users', { signal: controller.signal })
-      .then(async (res) => {
-        let data: any = null;
+      try {
+        const res = await fetch('/api/admin/users', { signal: controller.signal });
+        let data: unknown = null;
+
         try {
           data = await res.json();
-        } catch (e) {
+        } catch {
           // ignore parse errors
         }
 
         if (!res.ok) {
-          const msg = data && data.error ? data.error : `Server returned ${res.status}`;
+          const msg = typeof data === 'object' && data && 'error' in data
+            ? String((data as { error?: unknown }).error ?? `Server returned ${res.status}`)
+            : `Server returned ${res.status}`;
           throw new Error(msg);
         }
 
@@ -156,22 +235,61 @@ export default function AdminDashboard() {
         // - { users: [...] }
         // - [...] (array directly)
         let usersList: typeof loggedInUsers = [];
-        if (Array.isArray(data)) usersList = data;
-        else if (data && Array.isArray(data.users)) usersList = data.users;
+        if (Array.isArray(data)) {
+          usersList = data;
+        } else if (typeof data === 'object' && data && 'users' in data && Array.isArray((data as { users?: unknown }).users)) {
+          usersList = (data as { users: typeof loggedInUsers }).users;
+        }
 
         setLoggedInUsers(usersList);
-      })
-      .catch((err) => {
+      } catch (err) {
         if (controller.signal.aborted) return;
         setUsersError(err instanceof Error ? err.message : 'Unable to load users.');
-      })
-      .finally(() => {
+      } finally {
         if (controller.signal.aborted) return;
         setUsersLoading(false);
-      });
+      }
+    };
+
+    void loadUsers();
 
     return () => controller.abort();
   }, [activePanel, user]);
+
+  const fetchHistory = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/history`);
+      const data = await res.json();
+      if (res.ok && data && Array.isArray(data.events)) {
+        setUserHistories((prev) => ({ ...prev, [userId]: data.events }));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const updateTeamRole = async (memberId: string, nextRole: 'user' | 'admin') => {
+    setTeamStatus('');
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: memberId, role: nextRole }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error((data && typeof data === 'object' && 'error' in data && String(data.error)) || 'Unable to update role.');
+      }
+
+      setLoggedInUsers((prev) => prev.map((member) => (member.id === memberId ? { ...member, role: nextRole } : member)));
+      setTeamStatus(`Role updated to ${nextRole.toUpperCase()}.`);
+    } catch (error) {
+      setTeamStatus(error instanceof Error ? error.message : 'Unable to update role.');
+    }
+  };
 
   // Poll login history for expanded users
   useEffect(() => {
@@ -204,24 +322,14 @@ export default function AdminDashboard() {
       if (!expandedIds.includes(id)) stopPolling(id);
     }
 
+    const timersSnapshot = { ...pollingTimersRef.current };
+
     return () => {
       // cleanup all timers
-      const trackedNow = Object.keys(pollingTimersRef.current);
+      const trackedNow = Object.keys(timersSnapshot);
       for (const id of trackedNow) stopPolling(id);
     };
   }, [expandedUsers]);
-
-  const fetchHistory = async (userId: string) => {
-    try {
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/history`);
-      const data = await res.json();
-      if (res.ok && data && Array.isArray(data.events)) {
-        setUserHistories((prev) => ({ ...prev, [userId]: data.events }));
-      }
-    } catch {
-      // ignore
-    }
-  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -229,6 +337,201 @@ export default function AdminDashboard() {
 
   useEffect(() => subscribeUserAdminChat(() => setChatMsgs(getInitialUserAdminChat())), []);
   useEffect(() => subscribeAdminNotifications(() => setAdminNotifications(getAdminNotifications())), []);
+
+  useEffect(() => {
+    const syncReviews = () => setReviewTick((value) => value + 1);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === REVIEW_STORAGE_KEY) syncReviews();
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener(REVIEW_UPDATED_EVENT, syncReviews);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener(REVIEW_UPDATED_EVENT, syncReviews);
+    };
+  }, []);
+
+  const loadOrders = useCallback(async () => {
+    if (!user || user.role !== 'admin') return;
+    if (activePanel !== 'overview' && activePanel !== 'invoices' && activePanel !== 'courses-analytics') return;
+
+    const controller = new AbortController();
+
+    try {
+      setOrdersLoading(true);
+      setOrdersError(null);
+
+      const res = await fetch('/api/admin/orders', { signal: controller.signal });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const message = typeof data === 'object' && data && 'error' in data
+          ? String((data as { error?: unknown }).error ?? 'Unable to load orders.')
+          : 'Unable to load orders.';
+        throw new Error(message);
+      }
+
+      const apiOrders = Array.isArray(data?.orders)
+        ? data.orders.filter(
+            (order: CourseOrder) =>
+              order.status === 'paid' &&
+              Boolean(order.buyerEmail?.trim())
+          )
+        : [];
+
+      const localOrders = getPaidOrders();
+      const mergedOrders = [...apiOrders, ...localOrders].reduce<CourseOrder[]>((acc, order) => {
+        if (acc.some((item) => item.id === order.id)) return acc;
+        if (!order.buyerEmail?.trim()) return acc;
+        return [order, ...acc];
+      }, []);
+
+      setOrders(mergedOrders.sort((a, b) => b.createdAt - a.createdAt));
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const localOrders = getPaidOrders().filter((order) => Boolean(order.buyerEmail?.trim()));
+      setOrders(localOrders.sort((a, b) => b.createdAt - a.createdAt));
+      setOrdersError(error instanceof Error ? error.message : 'Unable to load orders.');
+    } finally {
+      if (!controller.signal.aborted) {
+        setOrdersLoading(false);
+      }
+    }
+  }, [activePanel, user]);
+
+  const coursesAnalytics = useMemo(() => {
+    const courseLookup = new Map(managedCourses.map((course) => [course.id, course] as const));
+    const paidOrders = orders.filter((order) => order.status === 'paid' && order.source !== 'demo');
+    const totalRevenue = paidOrders.reduce((sum, order) => sum + parseMoneyValue(order.amount), 0);
+
+    const courseStats = managedCourses.map((course) => {
+      const matchingOrders = paidOrders.filter((order) => order.courseId === course.id || order.courseTitle === course.title);
+      return {
+        ...course,
+        sales: matchingOrders.length,
+        revenue: matchingOrders.reduce((sum, order) => sum + parseMoneyValue(order.amount), 0),
+      };
+    });
+
+    const topCourse = [...courseStats].sort((a, b) => b.sales - a.sales || b.revenue - a.revenue)[0] ?? null;
+    const topCategories = Array.from(
+      courseStats.reduce((map, course) => {
+        const key = course.tag?.trim() || 'Uncategorized';
+        const next = map.get(key) ?? { tag: key, courses: 0, sales: 0, revenue: 0 };
+        next.courses += 1;
+        next.sales += course.sales;
+        next.revenue += course.revenue;
+        map.set(key, next);
+        return map;
+      }, new Map<string, { tag: string; courses: number; sales: number; revenue: number }>()).values()
+    ).sort((a, b) => b.revenue - a.revenue || b.sales - a.sales);
+
+    return {
+      totalCourses: managedCourses.length,
+      activeCourses: managedCourses.filter((course) => Boolean(course.videoUrl?.trim())).length,
+      totalOrders: paidOrders.length,
+      totalRevenue,
+      avgCoursePrice: managedCourses.length > 0
+        ? managedCourses.reduce((sum, course) => sum + parseMoneyValue(course.price), 0) / managedCourses.length
+        : 0,
+      courseStats: courseStats.sort((a, b) => b.revenue - a.revenue || b.sales - a.sales),
+      topCourse,
+      topCategories,
+      recentOrders: [...paidOrders].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5),
+      catalogCoverage: courseLookup.size,
+    };
+  }, [managedCourses, orders]);
+
+  const dashboardOverview = useMemo(() => {
+    const totalUsers = loggedInUsers.length;
+    const adminUsers = loggedInUsers.filter((member) => member.role === 'admin').length;
+    const totalCourses = managedCourses.length;
+    const activeCourses = coursesAnalytics.activeCourses;
+    const paidOrders = coursesAnalytics.totalOrders;
+    const revenue = coursesAnalytics.totalRevenue;
+    const conversionRate = totalUsers > 0 ? (paidOrders / totalUsers) * 100 : 0;
+
+    return {
+      stats: [
+        { label: 'Active Users', value: totalUsers.toLocaleString(), change: `${adminUsers} admins`, icon: '👥', color: 'var(--teal)' },
+        { label: 'Total Courses', value: totalCourses.toLocaleString(), change: `${activeCourses} live`, icon: '📚', color: 'var(--gold)' },
+        { label: 'Revenue', value: `$${revenue.toFixed(0)}`, change: `${paidOrders} paid`, icon: '💰', color: 'var(--green)' },
+        { label: 'Conversion', value: `${conversionRate.toFixed(1)}%`, change: 'Paid orders / users', icon: '📈', color: 'var(--violet)' },
+      ],
+      recentTransactions: coursesAnalytics.recentOrders,
+      topCourse: coursesAnalytics.topCourse,
+    };
+  }, [loggedInUsers, managedCourses, coursesAnalytics]);
+
+  const reviewOverview = useMemo(() => {
+    void reviewTick;
+
+    const reviews = getStoredReviews();
+    const sortedReviews = [...reviews].sort((left, right) => right.updatedAt - left.updatedAt);
+    const reviewCounts = sortedReviews.reduce<Record<string, number>>((acc, review) => {
+      acc[review.courseTitle] = (acc[review.courseTitle] || 0) + 1;
+      return acc;
+    }, {});
+
+    return {
+      totalReviews: sortedReviews.length,
+      recentReviews: sortedReviews.slice(0, 6),
+      topCourses: Object.entries(reviewCounts)
+        .map(([courseTitle, count]) => ({ courseTitle, count }))
+        .sort((left, right) => right.count - left.count)
+        .slice(0, 4),
+    };
+  }, [reviewTick]);
+
+  const dashboardTrends = useMemo(() => {
+    const now = new Date();
+    const monthKeys = Array.from({ length: 12 }, (_, index) => {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1);
+      return {
+        key: getMonthKey(monthDate),
+        label: getMonthLabel(monthDate.getFullYear(), monthDate.getMonth()),
+      };
+    });
+
+    const userCounts = monthKeys.map(({ key }) =>
+      loggedInUsers.filter((member) => {
+        const timestamp = member.lastLoginAt ? new Date(member.lastLoginAt).getTime() : member.createdAt ? new Date(member.createdAt).getTime() : 0;
+        if (!timestamp) return false;
+        return getMonthKey(new Date(timestamp)) === key;
+      }).length
+    );
+
+    const orderCounts = monthKeys.map(({ key }) =>
+      orders.filter((order) => getMonthKey(new Date(order.createdAt)) === key).length
+    );
+
+    const revenueCounts = monthKeys.map(({ key }) =>
+      orders
+        .filter((order) => getMonthKey(new Date(order.createdAt)) === key)
+        .reduce((sum, order) => sum + parseMoneyValue(order.amount), 0)
+    );
+
+    return {
+      monthLabels: monthKeys.map((item) => item.label),
+      userCounts,
+      orderCounts,
+      revenueCounts,
+      maxUserCount: Math.max(...userCounts, 1),
+      maxOrderCount: Math.max(...orderCounts, 1),
+    };
+  }, [loggedInUsers, orders]);
+
+  useEffect(() => {
+    const onPayments = () => { void loadOrders(); };
+    window.addEventListener(PAYMENTS_UPDATED_EVENT, onPayments as EventListener);
+    return () => window.removeEventListener(PAYMENTS_UPDATED_EVENT, onPayments as EventListener);
+  }, [loadOrders]);
+
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -318,6 +621,11 @@ export default function AdminDashboard() {
 
     const updated = saveUserAdminChat([...chatMsgs, nextMessage]);
     setChatMsgs(updated);
+    appendUserNotification({
+      type: 'message',
+      title: 'Admin replied',
+      description: `${senderName} replied to your support chat.`,
+    });
     setChatInput('');
   };
 
@@ -461,6 +769,58 @@ export default function AdminDashboard() {
     resetManagedCourses();
     setManagedCourses(getDefaultManagedCourses());
     setManagedCoursesStatus('Courses reset to default content.');
+  };
+
+  const handleCreateCourse = () => {
+    const title = courseDraft.title.trim();
+    const videoUrl = courseDraft.videoUrl.trim();
+
+    if (!title) {
+      setCourseDraftStatus('Course title is required.');
+      return;
+    }
+
+    if (!videoUrl) {
+      setCourseDraftStatus('Video URL is required.');
+      return;
+    }
+
+    const nextCourse = {
+      id: courseDraft.id.trim() || normalizeCourseId(title),
+      title,
+      level: courseDraft.level,
+      accent: courseDraft.accent,
+      icon: courseDraft.icon.trim() || '📘',
+      tag: courseDraft.tag.trim() || 'Development',
+      rating: '5.0',
+      reviews: '0',
+      byline: courseDraft.byline.trim() || 'by SkillForge Instructor',
+      duration: courseDraft.duration.trim() || '12h',
+      price: courseDraft.price.trim() || '$49',
+      oldPrice: courseDraft.oldPrice.trim() || '$99',
+      videoUrl,
+      previewSeconds: 300,
+      description: courseDraft.description.trim() || undefined,
+      lessons: '24 lectures',
+      instructor: courseDraft.byline.replace(/^by\s+/i, '').trim() || 'SkillForge Instructor',
+      certificate: 'Yes, Verified',
+      language: 'English',
+      access: 'Lifetime',
+      learnings: [],
+      relatedCourses: [],
+    };
+
+    const normalized = saveManagedCourses([...managedCourses, nextCourse]);
+    setManagedCourses(normalized);
+    setCourseDraft(blankCourseDraft());
+    setCourseDraftStatus('Course created successfully. Open Live Courses to edit it further.');
+    setManagedCoursesStatus('Courses and videos updated successfully.');
+    setActivePanel('live-courses');
+  };
+
+  const resetCourseDraft = () => {
+    setCourseDraft(blankCourseDraft());
+    setCourseDraftStatus('');
   };
 
   if (!user || user.role !== 'admin') return null;
@@ -758,7 +1118,9 @@ export default function AdminDashboard() {
                       Mark all read
                     </button>
                     <button
-                      onClick={handleDeleteAllNotifications}
+                      onClick={() => {
+                        handleDeleteAllNotifications();
+                      }}
                       style={{
                         background: 'transparent',
                         border: '1px solid var(--border-default)',
@@ -821,12 +1183,7 @@ export default function AdminDashboard() {
 
             {/* Stats Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginBottom: '40px' }}>
-              {[
-                { label: 'Active Users', value: '4,832', change: '+24%', icon: '👥', color: 'var(--teal)' },
-                { label: 'Total Courses', value: '1,247', change: '+12%', icon: '📚', color: 'var(--gold)' },
-                { label: 'Revenue', value: '$45.2K', change: '+42%', icon: '💰', color: 'var(--green)' },
-                { label: 'Conversion', value: '3.24%', change: '+8%', icon: '📈', color: 'var(--violet)' },
-              ].map((stat, i) => (
+              {dashboardOverview.stats.map((stat, i) => (
                 <div
                   key={i}
                   style={{
@@ -861,98 +1218,198 @@ export default function AdminDashboard() {
 
             {/* Charts */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '40px' }}>
-              {/* Users Analytics */}
               <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
                 <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '20px' }}>
                   Users Analytics
                 </h3>
-                <div style={{ position: 'relative', height: '180px', background: 'linear-gradient(to top, var(--teal-dim), transparent)', borderRadius: '8px', padding: '20px', display: 'flex', alignItems: 'flex-end', gap: '4px' }}>
-                  {[12, 19, 8, 15, 22, 18, 25, 28, 30, 26, 32, 38].map((val, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        flex: 1,
-                        height: `${(val / 40) * 100}%`,
-                        background: `linear-gradient(to top, var(--teal), rgba(20, 184, 166, 0.6))`,
-                        borderRadius: '4px 4px 0 0',
-                        transition: 'all 0.3s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.opacity = '0.7';
-                        e.currentTarget.style.transform = 'scaleY(1.1)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.opacity = '1';
-                        e.currentTarget.style.transform = 'scaleY(1)';
-                      }}
-                    />
-                  ))}
+                <div style={{ height: '220px', background: 'linear-gradient(to top, var(--teal-dim), transparent)', borderRadius: '8px', padding: '18px', display: 'flex', alignItems: 'flex-end', gap: '6px' }}>
+                  {dashboardTrends.userCounts.map((value, index) => {
+                    const height = `${Math.max((value / dashboardTrends.maxUserCount) * 100, value > 0 ? 10 : 4)}%`;
+
+                    return (
+                      <div key={`user-bar-${index}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <div
+                          title={`${dashboardTrends.monthLabels[index]}: ${value} logins`}
+                          style={{
+                            width: '100%',
+                            height,
+                            minHeight: value > 0 ? '10px' : '4px',
+                            background: 'linear-gradient(to top, var(--teal), rgba(20, 184, 166, 0.65))',
+                            borderRadius: '6px 6px 0 0',
+                          }}
+                        />
+                        <span style={{ fontSize: '10px', color: 'var(--text-secondary)', transform: 'rotate(-45deg)', transformOrigin: 'center' }}>
+                          {dashboardTrends.monthLabels[index]}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '12px', textAlign: 'center' }}>
-                  Last 12 months
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <span>Last 12 months</span>
+                  <span>{Math.max(...dashboardTrends.userCounts, 0)} max logins</span>
                 </div>
               </div>
 
-              {/* Orders Analytics */}
               <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
                 <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '20px' }}>
                   Orders Analytics
                 </h3>
-                <div style={{ position: 'relative', height: '180px', display: 'flex', alignItems: 'flex-end', gap: '8px', padding: '20px' }}>
-                  {[8, 12, 5, 14, 18, 22, 19, 25, 28, 32, 35, 38].map((val, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        flex: 1,
-                        height: `${(val / 40) * 100}%`,
-                        background: `linear-gradient(to top, var(--gold), rgba(251, 146, 60, 0.6))`,
-                        borderRadius: '4px',
-                        border: '1px solid rgba(251, 146, 60, 0.3)',
-                        transition: 'all 0.3s ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'linear-gradient(to top, var(--gold), var(--gold))';
-                        e.currentTarget.style.transform = 'scaleY(1.05)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = `linear-gradient(to top, var(--gold), rgba(251, 146, 60, 0.6))`;
-                        e.currentTarget.style.transform = 'scaleY(1)';
-                      }}
-                    />
-                  ))}
+                <div style={{ height: '220px', background: 'linear-gradient(to top, var(--gold-dim), transparent)', borderRadius: '8px', padding: '18px', display: 'flex', alignItems: 'flex-end', gap: '6px' }}>
+                  {dashboardTrends.orderCounts.map((value, index) => {
+                    const height = `${Math.max((value / dashboardTrends.maxOrderCount) * 100, value > 0 ? 10 : 4)}%`;
+
+                    return (
+                      <div key={`order-bar-${index}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                        <div
+                          title={`${dashboardTrends.monthLabels[index]}: ${value} orders`}
+                          style={{
+                            width: '100%',
+                            height,
+                            minHeight: value > 0 ? '10px' : '4px',
+                            background: 'linear-gradient(to top, var(--gold), rgba(251, 146, 60, 0.65))',
+                            borderRadius: '6px 6px 0 0',
+                            border: '1px solid rgba(251, 146, 60, 0.25)',
+                          }}
+                        />
+                        <span style={{ fontSize: '10px', color: 'var(--text-secondary)', transform: 'rotate(-45deg)', transformOrigin: 'center' }}>
+                          {dashboardTrends.monthLabels[index]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <span>Monthly paid order count</span>
+                  <span>{Math.max(...dashboardTrends.orderCounts, 0)} max orders</span>
                 </div>
               </div>
             </div>
 
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap' }}>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>All Reviews</h3>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Live review feed from all learners. Admins can only view.</p>
+                </div>
+                <span style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--gold)', fontSize: '12px', fontWeight: 700 }}>
+                  {reviewOverview.totalReviews} total
+                </span>
+              </div>
+
+              {reviewOverview.totalReviews === 0 ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No reviews submitted yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.7fr', gap: '16px' }}>
+                  <div style={{ display: 'grid', gap: '12px' }}>
+                    {reviewOverview.recentReviews.map((review) => (
+                      <div key={`${review.courseId}-${review.userEmail}-${review.updatedAt}`} style={{ border: '1px solid var(--border-default)', borderRadius: '12px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>{review.courseTitle}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{review.userName} · {review.userEmail}</div>
+                          </div>
+                          <div style={{ color: 'var(--gold)', fontWeight: 700 }}>{'★'.repeat(review.rating)}</div>
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 700, marginBottom: 6 }}>{review.title}</div>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '13px', lineHeight: 1.6 }}>
+                          {review.comment}
+                        </p>
+                        <div style={{ marginTop: 8, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          Updated {new Date(review.updatedAt).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: '10px', alignContent: 'start' }}>
+                    <div style={{ border: '1px solid var(--border-default)', borderRadius: '12px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Recent Activity</div>
+                      <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)' }}>{reviewOverview.totalReviews}</div>
+                    </div>
+
+                    <div style={{ border: '1px solid var(--border-default)', borderRadius: '12px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>Top Reviewed Courses</div>
+                      <div style={{ display: 'grid', gap: '8px' }}>
+                        {reviewOverview.topCourses.length === 0 ? (
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No data yet.</div>
+                        ) : reviewOverview.topCourses.map((item) => (
+                          <div key={item.courseTitle} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '13px' }}>
+                            <span style={{ color: 'var(--text-primary)' }}>{item.courseTitle}</span>
+                            <strong style={{ color: 'var(--gold)' }}>{item.count}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Recent Transactions */}
             <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '20px' }}>
-                Recent Transactions
-              </h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-default)' }}>
-                    <th style={{ padding: '12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>ID</th>
-                    <th style={{ padding: '12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Name</th>
-                    <th style={{ padding: '12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Price</th>
-                    <th style={{ padding: '12px', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '600' }}>Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { id: '#64954...', name: 'Shahdat Hosain', price: '$24.99', created: '23 hours ago' },
-                    { id: '#64934b...', name: 'Shahdat Sajeeb', price: '$24.99', created: '23 hours ago' },
-                    { id: '#64934a...', name: 'John Doe', price: '$24.99', created: '1 day ago' },
-                  ].map((txn, i) => (
-                    <tr key={i} style={{ borderBottom: i < 2 ? '1px solid var(--border-default)' : 'none', transition: 'all 0.2s ease' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--gold-dim)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-                      <td style={{ padding: '12px', fontSize: '14px', color: 'var(--text-secondary)' }}>{txn.id}</td>
-                      <td style={{ padding: '12px', fontSize: '14px', color: 'var(--text-primary)', fontWeight: '500' }}>{txn.name}</td>
-                      <td style={{ padding: '12px', fontSize: '14px', color: 'var(--gold)', fontWeight: '600' }}>{txn.price}</td>
-                      <td style={{ padding: '12px', fontSize: '14px', color: 'var(--text-secondary)' }}>{txn.created}</td>
-                    </tr>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '14px', marginBottom: '18px', flexWrap: 'wrap' }}>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
+                    Recent Transactions
+                  </h3>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    Latest paid orders from Stripe and the local fallback store.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                    Total: {dashboardOverview.recentTransactions.length}
+                  </span>
+                  <span style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--gold)', fontSize: '12px', fontWeight: 700 }}>
+                    Revenue: ${coursesAnalytics.totalRevenue.toFixed(0)}
+                  </span>
+                </div>
+              </div>
+
+              {dashboardOverview.recentTransactions.length === 0 ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No paid transactions yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {dashboardOverview.recentTransactions.map((txn) => (
+                    <div key={txn.id} style={{ border: '1px solid var(--border-default)', borderRadius: '12px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', marginBottom: '12px', flexWrap: 'wrap' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>
+                            {txn.courseTitle}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {txn.buyerName} · {txn.buyerEmail}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ padding: '6px 10px', borderRadius: '999px', background: 'var(--gold-dim)', color: 'var(--gold)', fontSize: '12px', fontWeight: 700 }}>
+                            {txn.amount}
+                          </span>
+                          <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--teal)', fontSize: '12px', fontWeight: 700 }}>
+                            Paid
+                          </span>
+                          <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                            {txn.source === 'real' ? 'Stripe' : 'Local'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {new Date(txn.createdAt).toLocaleString()} · {formatRelativeTime(txn.createdAt)}
+                        </div>
+
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          Course ID: {txn.courseId}
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1011,7 +1468,7 @@ export default function AdminDashboard() {
                           <td style={{ padding: '10px 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>{u.authProvider}</td>
                           <td style={{ padding: '10px 12px', fontSize: '14px', color: 'var(--text-secondary)' }}>{u.loginCount}</td>
                           <td
-                            title={Array.isArray((u as any).lastLogins) && (u as any).lastLogins.length > 0 ? (u as any).lastLogins.join('\n') : undefined}
+                            title={u.lastLogins?.length ? u.lastLogins.join('\n') : undefined}
                             style={{ padding: '10px 12px', fontSize: '13px', color: 'var(--text-secondary)' }}
                           >
                             {last}
@@ -1176,9 +1633,144 @@ export default function AdminDashboard() {
         {activePanel === 'invoices' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>Invoices</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>Invoice management features coming soon</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '18px' }}>
+              {[
+                { label: 'Total Invoices', value: orders.length.toString(), hint: 'Paid orders loaded' },
+                { label: 'Real Orders', value: orders.filter((order) => order.source === 'real').length.toString(), hint: 'From Stripe or save route' },
+                { label: 'Local Fallback', value: orders.filter((order) => order.source !== 'real').length.toString(), hint: 'Browser stored entries' },
+                { label: 'Revenue', value: `$${orders.reduce((sum, order) => sum + parseMoneyValue(order.amount), 0).toFixed(0)}`, hint: 'Combined paid amount' },
+              ].map((item) => (
+                <div key={item.label} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '18px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>{item.label}</div>
+                  <div style={{ fontSize: '26px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>{item.value}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{item.hint}</div>
+                </div>
+              ))}
             </div>
+
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', color: 'var(--text-secondary)' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '14px', marginBottom: '18px', flexWrap: 'wrap' }}>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '6px' }}>
+                    Invoice Ledger
+                  </h3>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    Each paid order is shown as an invoice with direct voice-meeting support.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                    Loading: {ordersLoading ? 'Yes' : 'No'}
+                  </span>
+                  <span style={{ padding: '7px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--gold)', fontSize: '12px', fontWeight: 700 }}>
+                    Voice rooms enabled
+                  </span>
+                </div>
+              </div>
+
+              {ordersError ? (
+                <div style={{ textAlign: 'center', marginBottom: 12, color: 'var(--rose)' }}>{ordersError}</div>
+              ) : null}
+              {ordersLoading ? (
+                <div style={{ textAlign: 'center', marginBottom: 12 }}>Loading paid orders...</div>
+              ) : null}
+
+              {orders.length === 0 ? (
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ marginBottom: 8 }}>No paid invoices yet.</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Once a payment is confirmed, the invoice row and voice meeting actions appear here.</p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {orders.map((o, index) => {
+                    const invoiceNo = `INV-${String(index + 1).padStart(3, '0')}`;
+                    const isReal = o.source === 'real';
+                    const room = `skillforge-invoice-${o.id}`;
+
+                    return (
+                      <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '16px', padding: 14, borderRadius: 12, background: 'var(--bg-card-alt)', border: '1px solid var(--border-default)' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                            <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>{invoiceNo}</div>
+                            <span style={{ padding: '5px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700 }}>
+                              {isReal ? 'Stripe' : 'Local'}
+                            </span>
+                            <span style={{ padding: '5px 10px', borderRadius: '999px', background: 'var(--gold-dim)', color: 'var(--gold)', fontSize: '11px', fontWeight: 700 }}>
+                              Paid
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>{o.courseTitle}</div>
+                          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                            <span>{o.buyerName}</span>
+                            <span>·</span>
+                            <span>{o.buyerEmail}</span>
+                            <span>·</span>
+                            <span>{new Date(o.createdAt).toLocaleString()}</span>
+                            <span>·</span>
+                            <span>{formatRelativeTime(o.createdAt)}</span>
+                          </div>
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            Course ID: {o.courseId}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '220px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Invoice total</span>
+                            <strong style={{ color: 'var(--gold)', fontSize: '16px' }}>{o.amount}</strong>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => {
+                                setMeetingRoom(room);
+                                setMeetingOrder({ id: o.id, buyerEmail: o.buyerEmail, buyerName: o.buyerName, courseTitle: o.courseTitle });
+                                window.open(`https://meet.jit.si/${room}`, '_blank');
+                              }}
+                              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'var(--gold-dim)', color: 'var(--gold)', cursor: 'pointer', fontWeight: 700, flex: 1 }}
+                            >
+                              Start Voice Meeting
+                            </button>
+                            <button
+                              onClick={() => {
+                                try { navigator.clipboard?.writeText(`${location.origin}/meet/${o.id}`); } catch {}
+                                appendAdminNotification({ type: 'message', title: 'Meeting link copied', description: 'Invite link copied for a paid order.' });
+                                setAdminNotifications(getAdminNotifications());
+                              }}
+                              style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border-default)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}
+                            >
+                              Copy Invite
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {meetingRoom && meetingOrder && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }}>
+                <div style={{ width: '90%', height: '80%', background: 'var(--bg-primary)', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>Voice Meeting — {meetingOrder.courseTitle}</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => { setMeetingRoom(null); setMeetingOrder(null); }} style={{ padding: '8px 12px' }}>Close</button>
+                      <button onClick={() => {
+                        const link = `https://meet.jit.si/${meetingRoom}`;
+                        appendAdminNotification({ type: 'message', title: 'Meeting started', description: `Started meeting for ${meetingOrder.courseTitle}.` });
+                        setAdminNotifications(getAdminNotifications());
+                        try { navigator.clipboard?.writeText(link); } catch {}
+                      }} style={{ padding: '8px 12px' }}>Notify (Copy Link)</button>
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden' }}>
+                    <iframe src={`https://meet.jit.si/${meetingRoom}`} style={{ width: '100%', height: '100%', border: 0 }} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1186,8 +1778,204 @@ export default function AdminDashboard() {
         {activePanel === 'create-course' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>Create New Course</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>Course creation form coming soon</p>
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: '18px' }}>Create a new course here. It will be saved to your managed course library and appear in Live Courses immediately.</p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Course Title</label>
+                  <input
+                    type="text"
+                    value={courseDraft.title}
+                    onChange={(e) => {
+                      const nextTitle = e.target.value;
+                      setCourseDraft((prev) => ({
+                        ...prev,
+                        title: nextTitle,
+                        id: prev.id.trim() ? prev.id : normalizeCourseId(nextTitle),
+                      }));
+                      if (courseDraftStatus) setCourseDraftStatus('');
+                    }}
+                    placeholder="Build Modern Web Apps"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Course ID</label>
+                  <input
+                    type="text"
+                    value={courseDraft.id}
+                    onChange={(e) => {
+                      setCourseDraft((prev) => ({ ...prev, id: e.target.value }));
+                      if (courseDraftStatus) setCourseDraftStatus('');
+                    }}
+                    placeholder="build-modern-web-apps"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Icon</label>
+                  <input
+                    type="text"
+                    value={courseDraft.icon}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, icon: e.target.value }))}
+                    placeholder="🎨"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Category</label>
+                  <input
+                    type="text"
+                    value={courseDraft.tag}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, tag: e.target.value }))}
+                    placeholder="Development"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Level</label>
+                  <select
+                    value={courseDraft.level}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, level: e.target.value as Course['level'] }))}
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  >
+                    <option value="BEGINNER">BEGINNER</option>
+                    <option value="INTERMEDIATE">INTERMEDIATE</option>
+                    <option value="ADVANCED">ADVANCED</option>
+                    <option value="EXPERT">EXPERT</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Accent</label>
+                  <select
+                    value={courseDraft.accent}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, accent: e.target.value as Course['accent'] }))}
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  >
+                    <option value="gold">gold</option>
+                    <option value="teal">teal</option>
+                    <option value="violet">violet</option>
+                    <option value="rose">rose</option>
+                    <option value="green">green</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Price</label>
+                  <input
+                    type="text"
+                    value={courseDraft.price}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, price: e.target.value }))}
+                    placeholder="$49"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Old Price</label>
+                  <input
+                    type="text"
+                    value={courseDraft.oldPrice}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, oldPrice: e.target.value }))}
+                    placeholder="$99"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Duration</label>
+                  <input
+                    type="text"
+                    value={courseDraft.duration}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, duration: e.target.value }))}
+                    placeholder="12h"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Instructor</label>
+                  <input
+                    type="text"
+                    value={courseDraft.byline}
+                    onChange={(e) => setCourseDraft((prev) => ({ ...prev, byline: e.target.value }))}
+                    placeholder="by SkillForge Instructor"
+                    style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Promo Video URL</label>
+                <input
+                  type="text"
+                  value={courseDraft.videoUrl}
+                  onChange={(e) => setCourseDraft((prev) => ({ ...prev, videoUrl: e.target.value }))}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: 'var(--text-primary)', fontWeight: '600' }}>Short Description</label>
+                <textarea
+                  value={courseDraft.description}
+                  onChange={(e) => setCourseDraft((prev) => ({ ...prev, description: e.target.value }))}
+                  placeholder="Write a short course summary..."
+                  rows={4}
+                  style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-default)', background: 'var(--bg-card-alt)', color: 'var(--text-primary)', fontSize: '14px', outline: 'none', resize: 'vertical' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleCreateCourse}
+                  style={{
+                    padding: '10px 16px',
+                    background: 'var(--gold)',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: 'var(--text-inverse)',
+                    cursor: 'pointer',
+                    fontWeight: '700',
+                  }}
+                >
+                  Create Course
+                </button>
+                <button
+                  onClick={resetCourseDraft}
+                  type="button"
+                  style={{
+                    padding: '10px 16px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '8px',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+
+              {courseDraftStatus && (
+                <p style={{ marginTop: '12px', color: courseDraftStatus.includes('successfully') ? 'var(--teal)' : 'var(--danger)', fontSize: '13px' }}>
+                  {courseDraftStatus}
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -1707,8 +2495,83 @@ export default function AdminDashboard() {
         {activePanel === 'manage-team' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>Manage Team</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>Team management features coming soon</p>
+            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: '16px' }}>Promote members to admin or demote them back to user. This uses the logged-in users list and updates roles immediately.</p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginBottom: '18px' }}>
+                <div style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Total members</div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>{loggedInUsers.length}</div>
+                </div>
+                <div style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Admins</div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--gold)' }}>{loggedInUsers.filter((member) => member.role === 'admin').length}</div>
+                </div>
+                <div style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px' }}>Active users</div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--teal)' }}>{loggedInUsers.filter((member) => member.role === 'user').length}</div>
+                </div>
+              </div>
+
+              {teamStatus && (
+                <p style={{ marginBottom: '14px', color: teamStatus.includes('updated') ? 'var(--teal)' : 'var(--danger)', fontSize: '13px' }}>
+                  {teamStatus}
+                </p>
+              )}
+
+              {usersLoading ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Loading team members…</div>
+              ) : loggedInUsers.length === 0 ? (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No team members available yet.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {loggedInUsers.map((member) => {
+                    const isAdmin = member.role === 'admin';
+
+                    return (
+                      <div key={member.id} style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: isAdmin ? 'var(--gold-dim)' : 'var(--teal-dim)', color: isAdmin ? 'var(--gold)' : 'var(--teal)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>
+                            {member.initials?.slice(0, 2) || member.name?.slice(0, 2).toUpperCase() || 'U'}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{member.name}</div>
+                            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{member.email}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>{member.authProvider} · {member.loginCount} logins</div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ padding: '6px 10px', borderRadius: '999px', border: '1px solid var(--border-default)', color: isAdmin ? 'var(--gold)' : 'var(--text-secondary)', fontSize: '12px', fontWeight: 700 }}>
+                            {member.role.toUpperCase()}
+                          </span>
+
+                          {member.id === user?.id ? (
+                            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Current admin</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => updateTeamRole(member.id, isAdmin ? 'user' : 'admin')}
+                              style={{
+                                background: isAdmin ? 'transparent' : 'var(--gold)',
+                                border: isAdmin ? '1px solid var(--border-default)' : 'none',
+                                color: isAdmin ? 'var(--text-secondary)' : 'var(--text-inverse)',
+                                borderRadius: '8px',
+                                padding: '7px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                              }}
+                            >
+                              {isAdmin ? 'Demote to User' : 'Promote to Admin'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1717,8 +2580,135 @@ export default function AdminDashboard() {
         {activePanel === 'courses-analytics' && (
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '30px' }}>Courses Analytics</h1>
-            <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              <p>Courses analytics and statistics coming soon</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+              {[
+                { label: 'Total Courses', value: coursesAnalytics.totalCourses.toString(), hint: 'Managed course catalog', color: 'var(--gold)' },
+                { label: 'Active Courses', value: coursesAnalytics.activeCourses.toString(), hint: 'Courses with video URLs', color: 'var(--teal)' },
+                { label: 'Paid Orders', value: coursesAnalytics.totalOrders.toString(), hint: 'Real confirmed purchases', color: 'var(--violet)' },
+                { label: 'Revenue', value: `$${coursesAnalytics.totalRevenue.toFixed(0)}`, hint: 'From paid orders', color: 'var(--green)' },
+              ].map((stat) => (
+                <div key={stat.label} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '20px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>{stat.label}</div>
+                  <div style={{ fontSize: '28px', fontWeight: 800, color: stat.color, marginBottom: '6px' }}>{stat.value}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{stat.hint}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '20px', marginBottom: '20px' }}>
+              <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>Course Performance</h3>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Revenue and sales by course</span>
+                </div>
+
+                {coursesAnalytics.courseStats.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No courses available yet.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {coursesAnalytics.courseStats.slice(0, 6).map((course, index) => {
+                      const maxRevenue = Math.max(...coursesAnalytics.courseStats.map((item) => item.revenue), 1);
+                      const width = `${Math.max((course.revenue / maxRevenue) * 100, course.sales > 0 ? 12 : 4)}%`;
+
+                      return (
+                        <div key={course.id} style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>{index + 1}. {course.title}</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{course.tag} · {course.level} · {course.duration}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--gold)' }}>{course.sales} sales</div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>${course.revenue.toFixed(0)} revenue</div>
+                            </div>
+                          </div>
+                          <div style={{ height: '10px', borderRadius: '999px', background: 'rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+                            <div style={{ width, height: '100%', borderRadius: '999px', background: 'linear-gradient(90deg, var(--gold), var(--teal))' }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '14px' }}>Top Category</h3>
+                  {coursesAnalytics.topCategories.length === 0 ? (
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No category data yet.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {coursesAnalytics.topCategories.slice(0, 4).map((category) => (
+                        <div key={category.tag} style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '12px', background: 'var(--bg-card-alt)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '6px' }}>
+                            <strong style={{ color: 'var(--text-primary)', fontSize: '14px' }}>{category.tag}</strong>
+                            <span style={{ color: 'var(--gold)', fontSize: '13px', fontWeight: 700 }}>${category.revenue.toFixed(0)}</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{category.courses} courses · {category.sales} sales</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '14px' }}>Best Performing Course</h3>
+                  {coursesAnalytics.topCourse ? (
+                    <div style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '14px', background: 'var(--bg-card-alt)' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>{coursesAnalytics.topCourse.title}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '10px' }}>{coursesAnalytics.topCourse.tag} · {coursesAnalytics.topCourse.level}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '13px' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{coursesAnalytics.topCourse.sales} sales</span>
+                        <span style={{ color: 'var(--gold)', fontWeight: 700 }}>${coursesAnalytics.topCourse.revenue.toFixed(0)} revenue</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No sales yet.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '14px' }}>Recent Paid Orders</h3>
+                {coursesAnalytics.recentOrders.length === 0 ? (
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>No paid orders found.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {coursesAnalytics.recentOrders.map((order) => (
+                      <div key={order.id} style={{ border: '1px solid var(--border-default)', borderRadius: '10px', padding: '12px', background: 'var(--bg-card-alt)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '6px' }}>
+                          <strong style={{ color: 'var(--text-primary)', fontSize: '14px' }}>{order.courseTitle}</strong>
+                          <span style={{ color: 'var(--gold)', fontSize: '13px', fontWeight: 700 }}>{order.amount}</span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>{order.buyerEmail}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(order.createdAt).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '24px' }}>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '14px' }}>Catalog Snapshot</h3>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    <span>Average course price</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>${coursesAnalytics.avgCoursePrice.toFixed(0)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    <span>Tracked catalog size</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{coursesAnalytics.catalogCoverage}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    <span>Revenue per course</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{coursesAnalytics.totalCourses > 0 ? `$${(coursesAnalytics.totalRevenue / coursesAnalytics.totalCourses).toFixed(0)}` : '$0'}</strong>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

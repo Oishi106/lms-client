@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
 
 import {
   getInitialUserAdminChat,
@@ -11,18 +12,46 @@ import {
   type UserAdminChatMessage,
 } from "@/app/lib/user-admin-chat";
 import { appendAdminNotification } from "@/app/lib/admin-notifications";
+import {
+  clearAllUserNotifications,
+  deleteUserNotification,
+  getUserNotifications,
+  markAllUserNotificationsRead,
+  subscribeUserNotifications,
+  type UserNotification,
+} from "@/app/lib/user-notifications";
+import { getPaidOrders, PAYMENTS_UPDATED_EVENT, ORDERS_STORAGE_KEY } from "@/app/lib/payments-data";
+import { getCourseHref, useCatalogCourses, type CatalogCourse } from "@/app/lib/course-catalog";
+import {
+  getCourseLearningProgress,
+  LEARNING_PROGRESS_STORAGE_KEY,
+  LEARNING_PROGRESS_UPDATED_EVENT,
+} from "@/app/lib/learning-progress-data";
+import {
+  getStoredWishlist,
+  toggleWishlistCourse,
+  WISHLIST_STORAGE_KEY,
+  WISHLIST_UPDATED_EVENT,
+} from "@/app/lib/wishlist-data";
+import {
+  getReviewsByEmail,
+  REVIEW_STORAGE_KEY,
+  REVIEW_UPDATED_EVENT,
+} from "@/app/lib/review-data";
 
 type Panel =
   | "ov"
   | "courses"
-  | "bookings"
+  | "videos"
   | "profile"
   | "reviews-d"
   | "users"
   | "manage-courses"
+  | "wishlist"
   | "orders"
   | "analytics"
   | "settings"
+  | "notifications"
   | "ai-chat";
 
 function SidebarLink({
@@ -51,6 +80,7 @@ export default function DashboardShell() {
   const router = useRouter();
   const { data: session } = useSession();
   const user = session?.user;
+  const { courses: catalogCourses } = useCatalogCourses();
 
   const [activePanel, setActivePanel] = useState<Panel>("ov");
   const [profileSaved, setProfileSaved] = useState(false);
@@ -58,6 +88,10 @@ export default function DashboardShell() {
   const [chatMsgs, setChatMsgs] = useState<UserAdminChatMessage[]>(getInitialUserAdminChat);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>(getUserNotifications);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [wishlistRevision, setWishlistRevision] = useState(0);
+  const [reviewRevision, setReviewRevision] = useState(0);
 
   const isAdmin = user?.role === "admin";
 
@@ -70,56 +104,193 @@ export default function DashboardShell() {
   }, [chatMsgs]);
 
   useEffect(() => subscribeUserAdminChat(() => setChatMsgs(getInitialUserAdminChat())), []);
+  useEffect(() => subscribeUserNotifications(() => setUserNotifications(getUserNotifications())), []);
+
+  useEffect(() => {
+    const sync = () => setRefreshToken((value) => value + 1);
+    const onStorage = (event: StorageEvent) => {
+      if (
+        event.key === ORDERS_STORAGE_KEY ||
+        event.key === LEARNING_PROGRESS_STORAGE_KEY ||
+        event.key === WISHLIST_STORAGE_KEY ||
+        event.key === REVIEW_STORAGE_KEY
+      ) {
+        sync();
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(PAYMENTS_UPDATED_EVENT, sync);
+    window.addEventListener(LEARNING_PROGRESS_UPDATED_EVENT, sync);
+    window.addEventListener(WISHLIST_UPDATED_EVENT, sync);
+    window.addEventListener(REVIEW_UPDATED_EVENT, sync);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(PAYMENTS_UPDATED_EVENT, sync);
+      window.removeEventListener(LEARNING_PROGRESS_UPDATED_EVENT, sync);
+      window.removeEventListener(WISHLIST_UPDATED_EVENT, sync);
+      window.removeEventListener(REVIEW_UPDATED_EVENT, sync);
+    };
+  }, []);
 
   const displayName = user?.name ?? "Learner";
 
-  const recentCourses = useMemo(
-    () => [
-      {
-        emoji: "🤖",
-        title: "ML Bootcamp 2025",
-        instructor: "Dr. Sarah Chen",
-        progressLabel: "67%",
-        progressWidth: "67%",
-        status: "Active",
+  const purchasedCourses = useMemo(() => {
+    void refreshToken;
+
+    const orders = getPaidOrders().filter((order) => Boolean(order.buyerEmail?.trim()));
+    const dedupedOrders = Array.from(new Map(orders.map((order) => [order.courseId, order])).values());
+
+    return dedupedOrders
+      .map((order) => {
+        const matchedCourse = catalogCourses.find((course) => course.id === order.courseId || course.slug === order.courseId);
+        return {
+          order,
+          course: matchedCourse,
+        };
+      })
+      .filter((item): item is { order: (typeof dedupedOrders)[number]; course: CatalogCourse } => Boolean(item.course));
+  }, [catalogCourses, refreshToken]);
+
+  const unlockedVideos = useMemo(() => {
+    void refreshToken;
+
+    const orders = getPaidOrders()
+      .filter((order) => Boolean(order.buyerEmail?.trim()))
+      .sort((left, right) => right.createdAt - left.createdAt);
+
+    const seen = new Set<string>();
+
+    return orders
+      .map((order) => {
+      const matchedCourse = catalogCourses.find((course) => course.id === order.courseId || course.slug === order.courseId);
+      const bookingDate = new Date(order.createdAt);
+      const videoUrl = order.videoUrl?.trim() || matchedCourse?.videoUrl || "";
+
+      return {
+        order,
+        course: matchedCourse,
+        videoUrl,
+        dateLabel: Number.isNaN(bookingDate.getTime())
+          ? "Recently"
+          : bookingDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        statusLabel: "Unlocked",
         statusClass: "pill pill-teal",
-        action: "Resume",
-        colorBg: "var(--gold-dim)",
-        colorText: "var(--gold)",
-      },
-      {
-        emoji: "⚛️",
-        title: "React Mastery",
-        instructor: "Marcus Reid",
-        progressLabel: "Done",
-        progressWidth: "100%",
-        status: "Completed",
-        statusClass: "pill pill-teal",
-        action: "Certificate",
-        colorBg: "var(--teal-dim)",
-        colorText: "var(--teal)",
-      },
-      {
-        emoji: "🎨",
-        title: "UX Design Pro",
-        instructor: "Aisha Nwosu",
-        progressLabel: "23%",
-        progressWidth: "23%",
-        status: "In Progress",
-        statusClass: "pill pill-gold",
-        action: "Continue",
-        colorBg: "var(--violet-dim)",
-        colorText: "var(--violet)",
-      },
-    ],
-    []
+      };
+      })
+      .filter(({ videoUrl }) => {
+        if (!videoUrl) return false;
+        if (seen.has(videoUrl)) return false;
+        seen.add(videoUrl);
+        return true;
+      });
+  }, [catalogCourses, refreshToken]);
+
+  const learningProgressCourses = useMemo(
+    () =>
+      purchasedCourses
+        .map(({ order, course }) => {
+          const progress = getCourseLearningProgress(course.id || order.courseId);
+          const isComplete = progress >= 100;
+          const isStarted = progress > 0;
+
+          return {
+            order,
+            course,
+            progress,
+            progressLabel: isComplete ? "Done" : `${progress}%`,
+            progressWidth: `${progress}%`,
+            status: isComplete ? "Completed" : isStarted ? "In Progress" : "Not started",
+            statusClass: isComplete ? "pill pill-teal" : isStarted ? "pill pill-gold" : "pill pill-rose",
+            action: isComplete ? "Review" : isStarted ? "Resume" : "Start",
+            colorBg:
+              course.accent === "teal"
+                ? "var(--teal-dim)"
+                : course.accent === "rose"
+                  ? "var(--rose-dim)"
+                  : course.accent === "violet"
+                    ? "var(--violet-dim)"
+                    : course.accent === "green"
+                      ? "rgba(34,197,94,0.12)"
+                      : "var(--gold-dim)",
+            colorText:
+              course.accent === "teal"
+                ? "var(--teal)"
+                : course.accent === "rose"
+                  ? "var(--rose)"
+                  : course.accent === "violet"
+                    ? "var(--violet)"
+                    : course.accent === "green"
+                      ? "rgb(34,197,94)"
+                      : "var(--gold)",
+          };
+        })
+        .sort((left, right) => right.progress - left.progress || right.order.createdAt - left.order.createdAt),
+    [purchasedCourses]
   );
+
+  const overallProgress = learningProgressCourses.length
+    ? Math.round(
+        learningProgressCourses.reduce((sum, item) => sum + item.progress, 0) / learningProgressCourses.length
+      )
+    : 0;
+  const completedCourses = learningProgressCourses.filter((item) => item.progress >= 100).length;
+  const activeCourses = learningProgressCourses.filter((item) => item.progress > 0 && item.progress < 100).length;
+  const wishlistedCourses = useMemo(() => {
+    void wishlistRevision;
+
+    const wishlistMap = getStoredWishlist();
+
+    return Object.entries(wishlistMap)
+      .map(([courseId, addedAt]) => {
+        const course = catalogCourses.find((item) => item.id === courseId || item.slug === courseId);
+        if (!course) return null;
+
+        return { course, addedAt };
+      })
+      .filter((item): item is { course: CatalogCourse; addedAt: number } => Boolean(item))
+      .sort((left, right) => right.addedAt - left.addedAt);
+  }, [catalogCourses, wishlistRevision]);
+
+  useEffect(() => {
+    const syncReviews = () => setReviewRevision((value) => value + 1);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === REVIEW_STORAGE_KEY) syncReviews();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(REVIEW_UPDATED_EVENT, syncReviews);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(REVIEW_UPDATED_EVENT, syncReviews);
+    };
+  }, []);
+
+  useEffect(() => {
+    const syncWishlist = () => setWishlistRevision((value) => value + 1);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === WISHLIST_STORAGE_KEY) syncWishlist();
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(WISHLIST_UPDATED_EVENT, syncWishlist);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(WISHLIST_UPDATED_EVENT, syncWishlist);
+    };
+  }, []);
 
   if (!user) return null;
 
   const userName = user.name ?? "Learner";
   const userEmail = user.email ?? "";
   const userInitials = user.initials ?? "U";
+  const currentUserEmail = userEmail.trim().toLowerCase();
+  void reviewRevision;
+  const userReviews = currentUserEmail ? getReviewsByEmail(currentUserEmail) : [];
   const firstName = userName.split(" ")[0] ?? userName;
   const lastName = userName.split(" ").slice(1).join(" ");
 
@@ -163,17 +334,31 @@ export default function DashboardShell() {
             onClick={() => setActivePanel("courses")}
           />
           <SidebarLink
-            active={activePanel === "bookings"}
-            icon="📅"
-            label="Bookings"
-            badge="3"
-            onClick={() => setActivePanel("bookings")}
+            active={activePanel === "videos"}
+            icon="▶️"
+            label="Unlocked Videos"
+            badge={unlockedVideos.length ? String(unlockedVideos.length) : undefined}
+            onClick={() => setActivePanel("videos")}
+          />
+          <SidebarLink
+            active={activePanel === "wishlist"}
+            icon="♡"
+            label="Saved for Later"
+            badge={wishlistedCourses.length ? String(wishlistedCourses.length) : undefined}
+            onClick={() => setActivePanel("wishlist")}
           />
           <SidebarLink
             active={activePanel === "profile"}
             icon="👤"
             label="My Profile"
             onClick={() => setActivePanel("profile")}
+          />
+          <SidebarLink
+            active={activePanel === "notifications"}
+            icon="🔔"
+            label="Notifications"
+            badge={userNotifications.filter((item) => !item.read).length ? String(userNotifications.filter((item) => !item.read).length) : undefined}
+            onClick={() => setActivePanel("notifications")}
           />
           <SidebarLink
             active={activePanel === "reviews-d"}
@@ -251,7 +436,7 @@ export default function DashboardShell() {
                 📚
               </div>
               <div className="ov-label">Enrolled Courses</div>
-              <div className="ov-value text-gold">7</div>
+              <div className="ov-value text-gold">{purchasedCourses.length}</div>
               <div className="ov-change">↑ +2 this month</div>
             </div>
             <div className="ov-card">
@@ -260,9 +445,9 @@ export default function DashboardShell() {
               </div>
               <div className="ov-label">Completed</div>
               <div className="ov-value" style={{ color: "var(--teal)" }}>
-                3
+                {completedCourses}
               </div>
-              <div className="ov-change">43% rate</div>
+              <div className="ov-change">{activeCourses} still active</div>
             </div>
             <div className="ov-card">
               <div className="ov-icon-wrap" style={{ background: "var(--violet-dim)" }}>
@@ -280,7 +465,7 @@ export default function DashboardShell() {
               </div>
               <div className="ov-label">Certificates</div>
               <div className="ov-value" style={{ color: "var(--rose)" }}>
-                3
+                {completedCourses}
               </div>
               <div className="ov-change">Ready to share</div>
             </div>
@@ -358,6 +543,63 @@ export default function DashboardShell() {
             </div>
 
             <div className="d-card">
+              <h3>Learning Progress</h3>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+                  {overallProgress}% average completion across your enrolled courses
+                </div>
+                <div className="pill pill-teal">{completedCourses}/{learningProgressCourses.length || 0} done</div>
+              </div>
+              {learningProgressCourses.length === 0 ? (
+                <div style={{ color: "var(--text-secondary)", padding: "18px 0" }}>
+                  Enroll in a course to start tracking your progress here.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {learningProgressCourses.slice(0, 4).map((courseRow) => (
+                    <div key={courseRow.course.id} style={{ display: "grid", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {courseRow.course.title}
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                            {courseRow.course.instructorName} · {courseRow.course.duration}
+                          </div>
+                        </div>
+                        <span className={courseRow.statusClass}>{courseRow.status}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ flex: 1, height: 6, borderRadius: 999, background: "var(--border-subtle)", overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: courseRow.progressWidth,
+                              height: "100%",
+                              borderRadius: 999,
+                              background:
+                                courseRow.course.accent === "teal"
+                                  ? "var(--teal)"
+                                  : courseRow.course.accent === "rose"
+                                    ? "var(--rose)"
+                                    : courseRow.course.accent === "violet"
+                                      ? "var(--violet)"
+                                      : courseRow.course.accent === "green"
+                                        ? "#22c55e"
+                                        : "var(--gold)",
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>
+                          {courseRow.progressLabel}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="d-card">
               <h3>Skill Mix</h3>
               {[
                 { label: "Development", val: "42%", c: "var(--gold)" },
@@ -399,27 +641,28 @@ export default function DashboardShell() {
                 <thead>
                   <tr>
                     <th>Course</th>
-                    <th>Instructor</th>
                     <th>Progress</th>
                     <th>Status</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {recentCourses.map((c) => (
-                    <tr key={c.title}>
+                  {learningProgressCourses.map((c) => (
+                    <tr key={c.course.id}>
                       <td>
                         <div className="user-cell-row">
                           <div
                             className="u-avatar-sm"
                             style={{ background: c.colorBg, color: c.colorText }}
                           >
-                            {c.emoji}
+                            {c.course.icon}
                           </div>
-                          {c.title}
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{c.course.title}</div>
+                            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{c.course.instructorName}</div>
+                          </div>
                         </div>
                       </td>
-                      <td style={{ color: "var(--text-secondary)" }}>{c.instructor}</td>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div
@@ -436,7 +679,15 @@ export default function DashboardShell() {
                                 width: c.progressWidth,
                                 height: "100%",
                                 background:
-                                  c.emoji === "⚛️" ? "var(--teal)" : c.emoji === "🎨" ? "var(--violet)" : "var(--gold)",
+                                    c.course.accent === "teal"
+                                      ? "var(--teal)"
+                                      : c.course.accent === "rose"
+                                        ? "var(--rose)"
+                                        : c.course.accent === "violet"
+                                          ? "var(--violet)"
+                                          : c.course.accent === "green"
+                                            ? "#22c55e"
+                                            : "var(--gold)",
                                 borderRadius: 2,
                               }}
                             />
@@ -450,7 +701,7 @@ export default function DashboardShell() {
                         <span className={c.statusClass}>{c.status}</span>
                       </td>
                       <td>
-                        <button className="action-sm" type="button">
+                        <button className="action-sm" type="button" onClick={() => router.push(getCourseHref(c.course))}>
                           {c.action}
                         </button>
                       </td>
@@ -470,72 +721,217 @@ export default function DashboardShell() {
             </div>
           </div>
           <div className="d-card">
-            <table className="d-table">
-              <thead>
-                <tr>
-                  <th>Course</th>
-                  <th>Status</th>
-                  <th>Progress</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentCourses.map((c) => (
-                  <tr key={`mc-${c.title}`}>
-                    <td>{c.title}</td>
-                    <td>
-                      <span className={c.statusClass}>{c.status}</span>
-                    </td>
-                    <td style={{ color: "var(--text-secondary)" }}>{c.progressLabel}</td>
+            {purchasedCourses.length === 0 ? (
+              <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--text-secondary)" }}>
+                <div style={{ fontSize: 44, marginBottom: 12 }}>📚</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+                  No enrolled courses yet
+                </div>
+                <div style={{ marginBottom: 18 }}>Your purchased courses will appear here after checkout.</div>
+                <button className="btn btn-primary" type="button" onClick={() => router.push("/explore") }>
+                  Browse Courses
+                </button>
+              </div>
+            ) : (
+              <table className="d-table">
+                <thead>
+                  <tr>
+                    <th>Course</th>
+                    <th>Instructor</th>
+                    <th>Status</th>
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {purchasedCourses.map(({ order, course }) => (
+                    <tr key={`mc-${order.courseId}`}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div
+                            style={{
+                              width: 42,
+                              height: 42,
+                              borderRadius: 12,
+                              overflow: "hidden",
+                              flexShrink: 0,
+                              background: "var(--bg-card)",
+                              border: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {course?.thumbnail ? (
+                              <div style={{ width: "100%", height: "100%", backgroundImage: `url(${course.thumbnail})`, backgroundSize: "cover", backgroundPosition: "center" }} />
+                            ) : (
+                              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {course?.icon || "📘"}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{course?.title || order.courseTitle}</div>
+                            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{order.amount}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ color: "var(--text-secondary)" }}>
+                        {course?.instructorName || course?.instructor || "SkillForge Instructor"}
+                      </td>
+                      <td>
+                        <span className="pill pill-teal">Unlocked</span>
+                      </td>
+                      <td>
+                        <Link className="btn btn-primary btn-sm" href={getCourseHref(course || { id: order.courseId, slug: order.courseId })}>
+                          Continue Learning
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
-        <div className={`dash-page${activePanel === "bookings" ? " active" : ""}`}>
+        <div className={`dash-page${activePanel === "wishlist" ? " active" : ""}`}>
           <div className="dash-top">
             <div>
-              <div className="dash-top-title">My Bookings</div>
+              <div className="dash-top-title">Saved for Later</div>
+              <div className="dash-top-sub">Courses you want to revisit or enroll in later</div>
+            </div>
+          </div>
+
+          <div className="d-card">
+            {wishlistedCourses.length === 0 ? (
+              <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--text-secondary)" }}>
+                <div style={{ fontSize: 44, marginBottom: 12 }}>♡</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+                  Your wishlist is empty
+                </div>
+                <div style={{ marginBottom: 18 }}>Save courses from Explore or a course page to keep them here.</div>
+                <button className="btn btn-primary" type="button" onClick={() => router.push("/explore") }>
+                  Browse Courses
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 14 }}>
+                {wishlistedCourses.map(({ course, addedAt }) => (
+                  <div key={course.id} style={{ display: "flex", gap: 14, alignItems: "center", justifyContent: "space-between", padding: 14, borderRadius: 14, border: "1px solid var(--border-default)", background: "var(--bg-card-alt)", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 14, background: "var(--gold-dim)", color: "var(--gold)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                        {course.icon}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {course.title}
+                        </div>
+                        <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 4 }}>
+                          {course.instructorName} · {course.duration} · Saved {new Date(addedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <Link className="btn btn-primary btn-sm" href={getCourseHref(course)}>
+                        Open Course
+                      </Link>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => toggleWishlistCourse(course.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className={`dash-page${activePanel === "videos" ? " active" : ""}`}>
+          <div className="dash-top">
+            <div>
+              <div className="dash-top-title">Unlocked Videos</div>
             </div>
           </div>
           <div className="d-card">
-            <table className="d-table">
-              <thead>
-                <tr>
-                  <th>Course</th>
-                  <th>Date</th>
-                  <th>Price</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>ML Bootcamp 2025</td>
-                  <td style={{ color: "var(--text-secondary)" }}>Jan 15, 2025</td>
-                  <td style={{ color: "var(--gold)", fontWeight: 700 }}>$89</td>
-                  <td>
-                    <span className="pill pill-teal">Active</span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>React Mastery</td>
-                  <td style={{ color: "var(--text-secondary)" }}>Dec 2, 2024</td>
-                  <td style={{ color: "var(--gold)", fontWeight: 700 }}>$79</td>
-                  <td>
-                    <span className="pill pill-teal">Completed</span>
-                  </td>
-                </tr>
-                <tr>
-                  <td>UX Design Pro</td>
-                  <td style={{ color: "var(--text-secondary)" }}>Feb 1, 2025</td>
-                  <td style={{ color: "var(--gold)", fontWeight: 700 }}>$99</td>
-                  <td>
-                    <span className="pill pill-gold">Pending</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            {unlockedVideos.length === 0 ? (
+              <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--text-secondary)" }}>
+                <div style={{ fontSize: 44, marginBottom: 12 }}>▶️</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+                  No unlocked videos yet
+                </div>
+                <div style={{ marginBottom: 18 }}>Your unlocked course videos will appear here after checkout.</div>
+                <button className="btn btn-primary" type="button" onClick={() => router.push("/explore") }>
+                  Explore Courses
+                </button>
+              </div>
+            ) : (
+              <table className="d-table">
+                <thead>
+                  <tr>
+                    <th>Video</th>
+                    <th>Unlocked</th>
+                    <th>Course</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unlockedVideos.map(({ order, course, dateLabel, statusLabel, statusClass }) => (
+                    <tr key={`video-${order.id}`}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div
+                            style={{
+                              width: 48,
+                              height: 48,
+                              borderRadius: 12,
+                              overflow: "hidden",
+                              flexShrink: 0,
+                              background: "var(--bg-card)",
+                              border: "1px solid var(--border-subtle)",
+                            }}
+                          >
+                            {course?.thumbnail ? (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  height: "100%",
+                                  backgroundImage: `url(${course.thumbnail})`,
+                                  backgroundSize: "cover",
+                                  backgroundPosition: "center",
+                                }}
+                              />
+                            ) : (
+                              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {course?.icon || "📘"}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700 }}>{course?.title || order.courseTitle}</div>
+                            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                              {course?.instructorName || course?.instructor || "SkillForge Instructor"}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ color: "var(--text-secondary)" }}>{dateLabel}</td>
+                      <td style={{ color: "var(--gold)", fontWeight: 700 }}>{order.amount}</td>
+                      <td>
+                        <span className={statusClass}>{statusLabel}</span>
+                      </td>
+                      <td>
+                        <Link className="btn btn-primary btn-sm" href={getCourseHref(course || { id: order.courseId, slug: order.courseId })}>
+                          Watch
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
@@ -616,16 +1012,58 @@ export default function DashboardShell() {
           <div className="dash-top">
             <div>
               <div className="dash-top-title">My Reviews</div>
+              <div className="dash-top-sub">Your submitted course reviews and ratings</div>
             </div>
+            <div className="pill pill-gold">{userReviews.length} reviews</div>
           </div>
           <div className="d-card">
-            <p style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
-              You haven’t written any reviews yet. Share your experience to help other learners!
-            </p>
-            <button className="btn btn-primary" type="button" onClick={() => router.push("/")}
-            >
-              Find Courses to Review
-            </button>
+            {userReviews.length === 0 ? (
+              <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--text-secondary)" }}>
+                <div style={{ fontSize: 44, marginBottom: 12 }}>⭐</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+                  You haven’t written any reviews yet
+                </div>
+                <div style={{ marginBottom: 18 }}>Open a course and add your review from the Reviews tab.</div>
+                <button className="btn btn-primary" type="button" onClick={() => router.push("/explore") }>
+                  Find Courses to Review
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 14 }}>
+                {userReviews.map((review) => (
+                  <div
+                    key={`${review.courseId}-${review.userEmail}`}
+                    style={{
+                      border: "1px solid var(--border-default)",
+                      borderRadius: 14,
+                      background: "var(--bg-card-alt)",
+                      padding: 16,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-primary)" }}>{review.courseTitle}</div>
+                        <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                          {new Date(review.updatedAt).toLocaleDateString()} · {review.userName}
+                        </div>
+                      </div>
+                      <div style={{ color: "var(--gold)", fontWeight: 700 }}>{"★".repeat(review.rating)}</div>
+                    </div>
+
+                    <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>{review.title}</div>
+                    <p style={{ color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.6, marginBottom: 14 }}>
+                      {review.comment}
+                    </p>
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <Link className="btn btn-primary btn-sm" href={getCourseHref({ id: review.courseId })}>
+                        Open Course
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -974,6 +1412,54 @@ export default function DashboardShell() {
             <button className="btn btn-primary" style={{ marginTop: 20 }} type="button">
               Save Preferences
             </button>
+          </div>
+        </div>
+
+        <div className={`dash-page${activePanel === "notifications" ? " active" : ""}`}>
+          <div className="dash-top">
+            <div>
+              <div className="dash-top-title">Notifications</div>
+              <div className="dash-top-sub">Replies from admin and system updates</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => setUserNotifications(markAllUserNotificationsRead())}>
+                Mark all read
+              </button>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setUserNotifications(clearAllUserNotifications())}>
+                Clear all
+              </button>
+            </div>
+          </div>
+
+          <div className="d-card">
+            {userNotifications.length === 0 ? (
+              <p style={{ color: "var(--text-secondary)" }}>No notifications yet.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {userNotifications.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      border: "1px solid var(--border-default)",
+                      borderRadius: 12,
+                      padding: 14,
+                      background: item.read ? "var(--bg-card-alt)" : "var(--gold-dim)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 6 }}>
+                      <strong style={{ fontSize: 14 }}>{item.title}</strong>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>{new Date(item.createdAt).toLocaleString()}</span>
+                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => setUserNotifications(deleteUserNotification(item.id))}>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    <p style={{ color: "var(--text-secondary)", margin: 0 }}>{item.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

@@ -349,6 +349,9 @@ export default function CategoriesPage() {
                             </span>
                           </div>
                           <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                            Instructor: {course.instructor || course.byline.replace(/^by\s+/i, '').split('·')[0].trim() || 'SkillForge Instructor'}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
                             {course.byline}
                           </div>
                           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '12px' }}>

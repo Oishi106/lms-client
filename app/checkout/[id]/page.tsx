@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Navbar from "@/app/components/landing/Navbar";
 import { getDefaultManagedCourses, getManagedCoursesClient, subscribeManagedCourses } from "@/app/lib/managed-courses-data";
-import { savePaidOrder, type CourseOrder } from "@/app/lib/payments-data";
+import { savePaidOrder, savePendingCheckout, type CourseOrder } from "@/app/lib/payments-data";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -27,6 +27,19 @@ export default function CheckoutPage() {
   const [cvv, setCvv] = useState("");
   const [error, setError] = useState("");
   const [paying, setPaying] = useState(false);
+
+  if (user?.role === 'admin') {
+    return (
+      <>
+        <Navbar />
+        <main style={{ paddingTop: 90 }}>
+          <div className="container" style={{ textAlign: "center", padding: "60px 20px" }}>
+            <h1>Admin cannot purchase courses.</h1>
+          </div>
+        </main>
+      </>
+    );
+  }
 
   if (!course) {
     return (
@@ -57,12 +70,27 @@ export default function CheckoutPage() {
       amount: course.price,
       buyerName: fullName.trim(),
       buyerEmail: email.trim(),
+      videoUrl: course.videoUrl,
       createdAt: Date.now(),
       status: "paid",
     };
 
     window.setTimeout(() => {
+      savePendingCheckout({
+        courseId: course.id,
+        courseTitle: course.title,
+        amount: course.price,
+        buyerName: fullName.trim(),
+        buyerEmail: email.trim(),
+        videoUrl: course.videoUrl,
+        createdAt: Date.now(),
+      });
       savePaidOrder(order);
+      void fetch('/api/admin/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(order),
+      });
       router.push(`/course/${course.id}`);
     }, 900);
   };

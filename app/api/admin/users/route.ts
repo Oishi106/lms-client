@@ -6,7 +6,25 @@ import { UserModel } from "@/app/lib/models/User";
 
 const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:8000";
 
-export async function GET(req: NextRequest) {
+type AdminUserRow = {
+  _id: { toString(): string };
+  name: string;
+  email: string;
+  role: "user" | "admin";
+  initials: string;
+  authProvider?: "credentials" | "google";
+  lastLoginAt?: Date | null;
+  loginCount?: number;
+  lastLoginProvider?: string | null;
+  createdAt: Date;
+};
+
+type LoginEventRow = {
+  userId: string;
+  createdAt?: Date | string;
+};
+
+export async function GET() {
   const session = await getServerSession(authOptions);
   const user = session?.user;
 
@@ -40,17 +58,17 @@ export async function GET(req: NextRequest) {
       .limit(500)
       .lean();
 
-    const users = docs.map((doc) => ({
-      id: (doc as any)._id.toString(),
-      name: (doc as any).name,
-      email: (doc as any).email,
-      role: (doc as any).role,
-      initials: (doc as any).initials,
-      authProvider: (doc as any).authProvider ?? "credentials",
-      lastLoginAt: (doc as any).lastLoginAt ?? null,
-      loginCount: (doc as any).loginCount ?? 0,
-      lastLoginProvider: (doc as any).lastLoginProvider ?? null,
-      createdAt: (doc as any).createdAt,
+    const users = (docs as AdminUserRow[]).map((doc) => ({
+      id: doc._id.toString(),
+      name: doc.name,
+      email: doc.email,
+      role: doc.role,
+      initials: doc.initials,
+      authProvider: doc.authProvider ?? "credentials",
+      lastLoginAt: doc.lastLoginAt ?? null,
+      loginCount: doc.loginCount ?? 0,
+      lastLoginProvider: doc.lastLoginProvider ?? null,
+      createdAt: doc.createdAt,
     }));
 
     try {
@@ -62,9 +80,9 @@ export async function GET(req: NextRequest) {
         .lean();
 
       const map = new Map<string, string[]>();
-      for (const ev of events) {
+      for (const ev of events as LoginEventRow[]) {
         const list = map.get(ev.userId) || [];
-        list.push((ev as any).createdAt?.toISOString?.() || new Date().toISOString());
+        list.push(new Date(ev.createdAt ?? Date.now()).toISOString());
         map.set(ev.userId, list);
       }
 
@@ -105,7 +123,7 @@ export async function DELETE(req: NextRequest) {
     try {
       await UserModel.deleteOne({ _id: userId });
       return NextResponse.json({ ok: true });
-    } catch (err) {
+    } catch {
       return NextResponse.json({ error: "Failed to delete user" }, { status: 500 });
     }
   }
@@ -116,4 +134,49 @@ export async function DELETE(req: NextRequest) {
 
   const data = await res.json();
   return NextResponse.json(data);
+}
+
+export async function PATCH(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+  const user = session?.user;
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (user.role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const payload = await req.json().catch(() => null);
+  const userId = typeof payload?.userId === "string" ? payload.userId : "";
+  const role = payload?.role === "admin" ? "admin" : payload?.role === "user" ? "user" : "";
+
+  if (!userId || !role) {
+    return NextResponse.json({ error: "Missing role update fields" }, { status: 400 });
+  }
+
+  if (process.env.MONGODB_URI) {
+    await connectMongoose();
+
+    try {
+      const result = await UserModel.updateOne({ _id: userId }, { $set: { role } });
+      if (result.matchedCount === 0) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 });
+      }
+
+      return NextResponse.json({ ok: true });
+    } catch {
+      return NextResponse.json({ error: "Failed to update user role" }, { status: 500 });
+    }
+  }
+
+  const res = await fetch(`${SERVER_URL}/api/v1/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+
+  const data = await res.json();
+  return NextResponse.json(data, { status: res.status });
 }

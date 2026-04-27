@@ -609,12 +609,20 @@ h1, h2, h3, h4, h5 { font-family: var(--font-display); font-weight: 700; line-he
   gap: 18px;
 }
 
+.course-grid-4 > div,
+.course-grid-3 > div {
+  display: flex;
+}
+
 .course-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   transition: var(--transition-theme), transform 0.18s var(--ease), border-color 0.18s;
 }
 
@@ -626,8 +634,26 @@ h1, h2, h3, h4, h5 { font-family: var(--font-display); font-weight: 700; line-he
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   background: radial-gradient(circle at 25% 25%, var(--bg-card-alt), transparent 55%),
               radial-gradient(circle at 70% 70%, var(--bg-elevated), transparent 55%);
+}
+
+.course-cover-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.course-cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 8, 16, 0.02) 0%, rgba(8, 8, 16, 0.18) 100%);
 }
 
 .course-card[data-accent="violet"] .course-cover {
@@ -666,7 +692,12 @@ h1, h2, h3, h4, h5 { font-family: var(--font-display); font-weight: 700; line-he
 }
 .course-icon { font-size: 42px; }
 
-.course-body { padding: 18px 18px 16px; }
+.course-body {
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
 
 .course-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 

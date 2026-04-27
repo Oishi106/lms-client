@@ -8,7 +8,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { courseId, courseName, price } = body;
+    const { courseId, courseName, price, customerEmail, videoUrl } = body;
 
     if (!courseName || !price) {
       return NextResponse.json({ error: "Missing data" }, { status: 400 });
@@ -27,9 +27,13 @@ export async function POST(req: Request) {
         },
       ],
       mode: "payment",
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?success=true`,
+      customer_email: typeof customerEmail === 'string' && customerEmail.trim() ? customerEmail.trim() : undefined,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/course/${courseId}?success=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/course/${courseId}?canceled=true`,
-      metadata: { courseId },
+      metadata: {
+        courseId,
+        videoUrl: typeof videoUrl === 'string' ? videoUrl.trim() : '',
+      },
     });
 
     return NextResponse.json({ id: session.id, url: session.url });
