@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { COURSES } from "@/app/lib/courses-data";
 
-const BACKEND_URL = "http://localhost:8000/api/v1/get-courses";
+const BACKEND_URL = "https://lms-server-1-jmha.onrender.com/api/v1/get-courses";
 
 const parsePriceValue = (value: string): number => {
   const parsed = Number.parseFloat(value.replace(/[^0-9.]/g, ""));
