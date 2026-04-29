@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { signOut, useSession } from "next-auth/react";
 
+import BrandLogo from "../BrandLogo";
 import { useTheme } from "../../providers";
 
 export default function Navbar() {
@@ -24,10 +25,7 @@ export default function Navbar() {
     <nav className="navbar" id="navbar">
       <div className="nav-inner">
         <Link className="nav-logo" href="/" aria-label="SkillForge Home">
-          <div className="nav-logo-mark" aria-hidden>
-            ⚡
-          </div>
-          SkillForge
+          <BrandLogo />
         </Link>
 
         <div className="nav-links" id="navLinks">

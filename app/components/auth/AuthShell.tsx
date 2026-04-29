@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import BrandLogo from "../BrandLogo";
+
 export default function AuthShell({
   title,
   subtitle,
@@ -28,10 +30,7 @@ export default function AuthShell({
 
         <div className="auth-logo-wrap">
           <div className="auth-logo">
-            <div className="nav-logo-mark" aria-hidden>
-              ⚡
-            </div>
-            <span>SkillForge</span>
+            <BrandLogo size={72} />
           </div>
         </div>
 

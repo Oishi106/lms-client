@@ -13,6 +13,13 @@ interface CourseDetailsTabsProps {
   course: CatalogCourse;
 }
 
+const curriculumModules = [
+  { title: 'Introduction & Fundamentals', lessons: 57, hours: 6 },
+  { title: 'Core Concepts', lessons: 68, hours: 8 },
+  { title: 'Projects & Capstone', lessons: 63, hours: 10 },
+  { title: 'Advanced Techniques', lessons: 94, hours: 12 },
+].sort((left, right) => left.hours - right.hours);
+
 function ReviewComposer({
   course,
   currentUserEmail,
@@ -352,48 +359,23 @@ export default function CourseDetailsTabs({ course }: CourseDetailsTabsProps) {
                 overflow: 'hidden',
               }}
             >
-              <div style={{ padding: '20px', background: 'var(--bg-card)' }}>
-                <h3 style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--text-primary)' }}>
-                  Module 1: Introduction & Fundamentals
-                </h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>57 lessons · 6 hours</p>
-              </div>
-              <div
-                style={{
-                  padding: '20px',
-                  background: 'var(--bg-surface)',
-                  borderTop: '1px solid var(--border-default)',
-                }}
-              >
-                <h3 style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--text-primary)' }}>
-                  Module 2: Core Concepts
-                </h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>68 lessons · 8 hours</p>
-              </div>
-              <div
-                style={{
-                  padding: '20px',
-                  background: 'var(--bg-card)',
-                  borderTop: '1px solid var(--border-default)',
-                }}
-              >
-                <h3 style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--text-primary)' }}>
-                  Module 3: Advanced Techniques
-                </h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>94 lessons · 12 hours</p>
-              </div>
-              <div
-                style={{
-                  padding: '20px',
-                  background: 'var(--bg-surface)',
-                  borderTop: '1px solid var(--border-default)',
-                }}
-              >
-                <h3 style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--text-primary)' }}>
-                  Module 4: Projects & Capstone
-                </h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>63 lessons · 10 hours</p>
-              </div>
+              {curriculumModules.map((module, index) => (
+                <div
+                  key={module.title}
+                  style={{
+                    padding: '20px',
+                    background: index % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-surface)',
+                    borderTop: index === 0 ? 'none' : '1px solid var(--border-default)',
+                  }}
+                >
+                  <h3 style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--text-primary)' }}>
+                    Module {index + 1}: {module.title}
+                  </h3>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+                    {module.lessons} lessons · {module.hours} hours
+                  </p>
+                </div>
+              ))}
             </div>
           </section>
         )}

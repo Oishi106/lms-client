@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import BrandLogo from "../BrandLogo";
+
 export default function Footer() {
   return (
     <footer className="footer">
@@ -13,10 +15,7 @@ export default function Footer() {
               href="/"
               style={{ display: "inline-flex", marginBottom: 2 }}
             >
-              <div className="nav-logo-mark" aria-hidden>
-                ⚡
-              </div>
-              SkillForge
+              <BrandLogo />
             </Link>
             <p className="footer-brand-desc">
               Empowering the next generation of professionals through expert-led,
