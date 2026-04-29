@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Navbar } from "../components/landing";
 import DashboardShell from "../components/dashboard/DashboardShell";
@@ -8,7 +8,7 @@ import AdminDashboard from "../components/dashboard/AdminDashboard";
 import { useSession } from "next-auth/react";
 import { clearPendingCheckout, getPendingCheckout, savePaidOrder, type CourseOrder } from "@/app/lib/payments-data";
 
-export default function DashboardPage() {
+function DashboardContent() {
   const { data: session, status } = useSession();
   const searchParams = useSearchParams();
   const confirmationRanRef = useRef(false);
@@ -59,5 +59,13 @@ export default function DashboardPage() {
         {user?.role === 'admin' ? <AdminDashboard /> : <DashboardShell />}
       </main>
     </>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardContent />
+    </Suspense>
   );
 }
