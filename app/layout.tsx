@@ -6,13 +6,13 @@ import Providers from "./providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  subsets: ["latin"],        
 });
 
-const geistMono = Geist_Mono({
+const geistMono = Geist_Mono({    
   variable: "--font-geist-mono",
   subsets: ["latin"],
-});
+});    
 
 export const metadata: Metadata = {
   title: "SkillForge",
