@@ -5,6 +5,7 @@ export type OtpDoc = {
   code: string;
   expiresAt: Date;
   attempts?: number;
+  createdAt?: Date;
 };
 
 const OtpSchema = new mongoose.Schema<OtpDoc>(
