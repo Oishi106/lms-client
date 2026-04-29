@@ -27,7 +27,7 @@ export const getUserNotifications = (): UserNotification[] => {
     const valid: UserNotification[] = parsed
       .map((item, index) => ({
         id: item.id?.trim() || `un-${index + 1}`,
-        type: item.type === 'message' ? 'message' : 'system',
+        type: (item.type === 'message' ? 'message' : 'system') as 'message' | 'system',
         title: item.title?.trim() || 'Notification',
         description: item.description?.trim() || '',
         createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
