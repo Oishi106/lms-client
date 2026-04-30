@@ -117,7 +117,7 @@ export default function Explore() {
                     <span className="course-price-now">{c.price}</span>
                     <span className="course-price-old">{c.oldPrice}</span>
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end" }}>
                     <button
                       type="button"
                       className="course-view"

@@ -370,9 +370,19 @@ export default function CoursePage() {
                             <span className="course-price-now">{relatedCourse.price}</span>
                             <span className="course-price-old">{relatedCourse.oldPrice}</span>
                           </div>
-                          <Link className="course-view" href={getCourseHref(relatedCourse)}>
-                            View →
-                          </Link>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end" }}>
+                            <button
+                              type="button"
+                              className="course-view"
+                              onClick={() => toggleWishlistCourse(relatedCourse.id)}
+                              style={{ minWidth: 88 }}
+                            >
+                              {wishlistedCourseIds.includes(relatedCourse.id) ? "Saved ♥" : "Save ♡"}
+                            </button>
+                            <Link className="course-view" href={getCourseHref(relatedCourse)}>
+                              View →
+                            </Link>
+                          </div>
                         </div>
                       </div>
                     </article>

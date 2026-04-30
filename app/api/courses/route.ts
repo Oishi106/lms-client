@@ -31,7 +31,7 @@ const buildFallbackApiCourses = () =>
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     instructor: {
-      // ফিক্স করা লাইন: ?? এবং || একসাথে ব্যবহারের জন্য ব্র্যাকেট দেওয়া হয়েছে
+      
       name: (course.instructor ?? course.byline.replace(/^by\s+/i, "").split("·")[0].trim()) || "SkillForge Instructor",
       role: "Course Instructor",
       avatar: "",
