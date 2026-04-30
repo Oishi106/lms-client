@@ -16,12 +16,21 @@ type UserWithAppFields = {
   initials?: string;
 };
 
+type UserIdCarrier = {
+  id?: string;
+};
+
 const isGoogleConfigured = Boolean(
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
 );
 
 export const authOptions: NextAuthOptions = {
-  session: { strategy: "jwt" },
+  // ১. সেশন স্ট্র্যাটেজি এবং সিক্রেট নিশ্চিত করা
+  session: { 
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // ৩০ দিন
+  },
+  secret: process.env.NEXTAUTH_SECRET,
 
   providers: [
     ...(isGoogleConfigured
@@ -48,6 +57,9 @@ export const authOptions: NextAuthOptions = {
             ? (credentials.role as AppRole)
             : undefined;
 
+        // ডেটাবেস কানেকশন নিশ্চিত করা
+        await connectMongoose();
+
         const user = await verifyUserCredentials(
           credentials.email.toString(),
           credentials.password.toString(),
@@ -68,7 +80,7 @@ export const authOptions: NextAuthOptions = {
   ],
 
   callbacks: {
-    async signIn({ user, account, profile }) {
+    async signIn({ user, account }) {
       if (!process.env.MONGODB_URI) return true;
 
       try {
@@ -90,8 +102,9 @@ export const authOptions: NextAuthOptions = {
         }
 
         if (user.email) {
+          const email = normalizeEmail(user.email);
           await UserModel.updateOne(
-            { email: normalizeEmail(user.email) },
+            { email },
             {
               $set: {
                 lastLoginAt: new Date(),
@@ -102,25 +115,30 @@ export const authOptions: NextAuthOptions = {
           );
 
           try {
-            // Record a login event for complete timeline/history
             const { LoginEventModel } = await import("@/app/lib/models/LoginEvent");
+            const appUser = user as typeof user & UserIdCarrier;
             await LoginEventModel.create({
-              userId: (user as any).id ?? "",
-              email: normalizeEmail(user.email),
+              userId: appUser.id ?? "",
+              email: email,
               provider: account?.provider ?? "unknown",
             });
-          } catch {
-            // ignore login event errors
+          } catch (e) {
+            console.error("Login event error:", e);
           }
         }
-      } catch {
-        // Do not block login if analytics write fails.
+      } catch (error) {
+        console.error("SignIn Callback Error:", error);
       }
 
       return true;
     },
 
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
+      // সেশন আপডেট সাপোর্ট করার জন্য
+      if (trigger === "update" && session) {
+        return { ...token, ...session.user };
+      }
+
       if (user) {
         const appUser = user as typeof user & UserWithAppFields;
         token.id = appUser.id;
@@ -140,5 +158,21 @@ export const authOptions: NextAuthOptions = {
     },
   },
 
-  pages: { signIn: "/login" },
+  pages: { 
+    signIn: "/login",
+    error: "/login", // এরর হলেও লগইন পেজে রাখবে
+  },
+  
+  // ডেপ্লয়মেন্টের জন্য সিকিউরিটি কুকি কনফিগারেশন (অপশনাল কিন্তু ভালো)
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === "production" ? `__Secure-next-auth.session-token` : `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+  },
 };
