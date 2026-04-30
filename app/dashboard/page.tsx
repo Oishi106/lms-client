@@ -10,6 +10,7 @@ import { clearPendingCheckout, getPendingCheckout, savePaidOrder, type CourseOrd
 
 function DashboardContent() {
   const { data: session, status } = useSession();
+  const currentUserEmail = session?.user?.email?.trim().toLowerCase() ?? '';
   const searchParams = useSearchParams();
   const confirmationRanRef = useRef(false);
 
@@ -21,7 +22,7 @@ function DashboardContent() {
 
     confirmationRanRef.current = true;
 
-    const pendingCheckout = getPendingCheckout();
+    const pendingCheckout = getPendingCheckout(currentUserEmail);
     const payload = sessionId ? { sessionId } : pendingCheckout ? { order: pendingCheckout } : null;
 
     if (!payload) {
@@ -37,16 +38,16 @@ function DashboardContent() {
       .then(async (response) => {
         const data = (await response.json().catch(() => null)) as { ok?: boolean; order?: CourseOrder } | null;
         if (response.ok && data?.order) {
-          savePaidOrder(data.order);
+          savePaidOrder(data.order, currentUserEmail);
         }
       })
       .catch(() => {
         confirmationRanRef.current = false;
       })
       .finally(() => {
-        clearPendingCheckout();
+        clearPendingCheckout(currentUserEmail);
       });
-  }, [searchParams]);
+  }, [currentUserEmail, searchParams]);
 
   if (status === "loading") return null;
 

@@ -29,10 +29,16 @@ export type PendingCheckout = {
   createdAt: number;
 };
 
-export const getStoredOrders = (): CourseOrder[] => {
+const normalizeEmail = (email?: string): string => email?.trim().toLowerCase() || '';
+const getScopedKey = (baseKey: string, userEmail?: string): string => {
+  const normalizedEmail = normalizeEmail(userEmail);
+  return normalizedEmail ? `${baseKey}:${normalizedEmail}` : baseKey;
+};
+
+export const getStoredOrders = (userEmail?: string): CourseOrder[] => {
   if (typeof window === 'undefined') return [];
 
-  const raw = window.localStorage.getItem(ORDERS_STORAGE_KEY);
+  const raw = window.localStorage.getItem(getScopedKey(ORDERS_STORAGE_KEY, userEmail));
   if (!raw) return [];
 
   try {
@@ -43,14 +49,14 @@ export const getStoredOrders = (): CourseOrder[] => {
   }
 };
 
-export const getPaidOrders = (): CourseOrder[] => {
-  return getStoredOrders().filter((order) => order.status === 'paid' && order.source !== 'demo');
+export const getPaidOrders = (userEmail?: string): CourseOrder[] => {
+  return getStoredOrders(userEmail).filter((order) => order.status === 'paid' && order.source !== 'demo');
 };
 
-export const getEnrolledCourseIds = (): string[] => {
+export const getEnrolledCourseIds = (userEmail?: string): string[] => {
   if (typeof window === 'undefined') return [];
 
-  const raw = window.localStorage.getItem(ENROLLED_COURSES_STORAGE_KEY);
+  const raw = window.localStorage.getItem(getScopedKey(ENROLLED_COURSES_STORAGE_KEY, userEmail));
   if (!raw) return [];
 
   try {
@@ -61,16 +67,16 @@ export const getEnrolledCourseIds = (): string[] => {
   }
 };
 
-export const hasPurchasedCourse = (courseId: string): boolean => {
-  return getEnrolledCourseIds().includes(courseId);
+export const hasPurchasedCourse = (courseId: string, userEmail?: string): boolean => {
+  return getEnrolledCourseIds(userEmail).includes(courseId);
 };
 
 const normalizeVideoKey = (videoUrl: string): string => videoUrl.trim();
 
-export const getUnlockedVideoUrls = (): string[] => {
+export const getUnlockedVideoUrls = (userEmail?: string): string[] => {
   if (typeof window === 'undefined') return [];
 
-  const raw = window.localStorage.getItem(UNLOCKED_VIDEOS_STORAGE_KEY);
+  const raw = window.localStorage.getItem(getScopedKey(UNLOCKED_VIDEOS_STORAGE_KEY, userEmail));
   if (!raw) return [];
 
   try {
@@ -81,33 +87,33 @@ export const getUnlockedVideoUrls = (): string[] => {
   }
 };
 
-export const hasPurchasedVideo = (videoUrl: string): boolean => {
+export const hasPurchasedVideo = (videoUrl: string, userEmail?: string): boolean => {
   const normalized = normalizeVideoKey(videoUrl);
   if (!normalized) return false;
 
-  return getUnlockedVideoUrls().includes(normalized);
+  return getUnlockedVideoUrls(userEmail).includes(normalized);
 };
 
-export const saveUnlockedVideo = (videoUrl: string) => {
+export const saveUnlockedVideo = (videoUrl: string, userEmail?: string) => {
   if (typeof window === 'undefined') return;
 
   const normalized = normalizeVideoKey(videoUrl);
   if (!normalized) return;
 
-  const unlocked = new Set(getUnlockedVideoUrls());
+  const unlocked = new Set(getUnlockedVideoUrls(userEmail));
   unlocked.add(normalized);
-  window.localStorage.setItem(UNLOCKED_VIDEOS_STORAGE_KEY, JSON.stringify(Array.from(unlocked)));
+  window.localStorage.setItem(getScopedKey(UNLOCKED_VIDEOS_STORAGE_KEY, userEmail), JSON.stringify(Array.from(unlocked)));
 };
 
-export const savePendingCheckout = (pending: PendingCheckout) => {
+export const savePendingCheckout = (pending: PendingCheckout, userEmail?: string) => {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PENDING_CHECKOUT_STORAGE_KEY, JSON.stringify(pending));
+  window.localStorage.setItem(getScopedKey(PENDING_CHECKOUT_STORAGE_KEY, userEmail), JSON.stringify(pending));
 };
 
-export const getPendingCheckout = (): PendingCheckout | null => {
+export const getPendingCheckout = (userEmail?: string): PendingCheckout | null => {
   if (typeof window === 'undefined') return null;
 
-  const raw = window.localStorage.getItem(PENDING_CHECKOUT_STORAGE_KEY);
+  const raw = window.localStorage.getItem(getScopedKey(PENDING_CHECKOUT_STORAGE_KEY, userEmail));
   if (!raw) return null;
 
   try {
@@ -120,21 +126,22 @@ export const getPendingCheckout = (): PendingCheckout | null => {
   }
 };
 
-export const clearPendingCheckout = () => {
+export const clearPendingCheckout = (userEmail?: string) => {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(PENDING_CHECKOUT_STORAGE_KEY);
+  window.localStorage.removeItem(getScopedKey(PENDING_CHECKOUT_STORAGE_KEY, userEmail));
 };
 
-export const savePaidOrder = (order: CourseOrder) => {
-  const prevOrders = getStoredOrders();
-  window.localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify([order, ...prevOrders]));
+export const savePaidOrder = (order: CourseOrder, userEmail?: string) => {
+  const normalizedEmail = normalizeEmail(userEmail || order.buyerEmail);
+  const prevOrders = getStoredOrders(normalizedEmail);
+  window.localStorage.setItem(getScopedKey(ORDERS_STORAGE_KEY, normalizedEmail), JSON.stringify([order, ...prevOrders]));
 
-  const enrolled = new Set(getEnrolledCourseIds());
+  const enrolled = new Set(getEnrolledCourseIds(normalizedEmail));
   enrolled.add(order.courseId);
-  window.localStorage.setItem(ENROLLED_COURSES_STORAGE_KEY, JSON.stringify(Array.from(enrolled)));
+  window.localStorage.setItem(getScopedKey(ENROLLED_COURSES_STORAGE_KEY, normalizedEmail), JSON.stringify(Array.from(enrolled)));
 
   if (order.videoUrl?.trim()) {
-    saveUnlockedVideo(order.videoUrl);
+    saveUnlockedVideo(order.videoUrl, normalizedEmail);
   }
 
   window.dispatchEvent(new Event(PAYMENTS_UPDATED_EVENT));

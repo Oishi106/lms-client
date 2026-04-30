@@ -80,6 +80,7 @@ export default function CourseVideoPlayer({
 }: CourseVideoPlayerProps) {
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === 'admin';
+  const currentUserEmail = session?.user?.email?.trim().toLowerCase() ?? '';
   const [purchased, setPurchased] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState(videoUrl);
   const [loading, setLoading] = useState(false);
@@ -95,12 +96,12 @@ export default function CourseVideoPlayer({
       const normalizedProgress = Math.max(currentProgress, Math.min(100, Math.round(nextProgress)));
 
       if (normalizedProgress !== currentProgress) {
-        saveCourseLearningProgress(courseId, normalizedProgress);
+        saveCourseLearningProgress(courseId, normalizedProgress, currentUserEmail);
       }
 
       return normalizedProgress;
     });
-  }, [courseId]);
+  }, [courseId, currentUserEmail]);
 
   const stopYoutubePolling = useCallback(() => {
     if (youtubePollRef.current !== null) {
@@ -144,13 +145,14 @@ export default function CourseVideoPlayer({
         return;
       }
 
-      setPurchased(hasPurchasedCourse(courseId) || hasPurchasedVideo(activeVideoUrl));
+      setPurchased(hasPurchasedCourse(courseId, currentUserEmail) || hasPurchasedVideo(activeVideoUrl, currentUserEmail));
     };
 
     refreshAccess();
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === ENROLLED_COURSES_STORAGE_KEY) refreshAccess();
+      const key = event.key || "";
+      if (key === ENROLLED_COURSES_STORAGE_KEY || key.startsWith(`${ENROLLED_COURSES_STORAGE_KEY}:`)) refreshAccess();
     };
 
     window.addEventListener("storage", onStorage);
@@ -160,15 +162,16 @@ export default function CourseVideoPlayer({
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(PAYMENTS_UPDATED_EVENT, refreshAccess);
     };
-  }, [courseId, activeVideoUrl, isAdmin]);
+  }, [activeVideoUrl, courseId, currentUserEmail, isAdmin]);
 
   useEffect(() => {
-    const refreshProgress = () => setProgress(getCourseLearningProgress(courseId));
+    const refreshProgress = () => setProgress(getCourseLearningProgress(courseId, currentUserEmail));
 
     refreshProgress();
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === LEARNING_PROGRESS_STORAGE_KEY) refreshProgress();
+      const key = event.key || "";
+      if (key === LEARNING_PROGRESS_STORAGE_KEY || key.startsWith(`${LEARNING_PROGRESS_STORAGE_KEY}:`)) refreshProgress();
     };
 
     window.addEventListener("storage", onStorage);
@@ -178,7 +181,7 @@ export default function CourseVideoPlayer({
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(LEARNING_PROGRESS_UPDATED_EVENT, refreshProgress);
     };
-  }, [courseId]);
+  }, [courseId, currentUserEmail]);
 
   useEffect(() => {
     if (!purchased || !youtubeId) return;

@@ -68,16 +68,19 @@ export default function ExplorePage() {
   const [appliedSortBy, setAppliedSortBy] = useState<SortOption>("popular");
   const [currentPage, setCurrentPage] = useState(1);
   const [wishlistRevision, setWishlistRevision] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const itemsPerPage = 9;
 
   const router = useRouter();
-  const { status } = useSession();
+  const { data: session, status } = useSession();
+  const currentUserEmail = session?.user?.email?.trim().toLowerCase() ?? "";
 
   useEffect(() => {
     const syncWishlist = () => setWishlistRevision((value) => value + 1);
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WISHLIST_STORAGE_KEY) syncWishlist();
+      const key = event.key || "";
+      if (key === WISHLIST_STORAGE_KEY || key.startsWith(`${WISHLIST_STORAGE_KEY}:`)) syncWishlist();
     };
 
     window.addEventListener("storage", onStorage);
@@ -89,7 +92,7 @@ export default function ExplorePage() {
     };
   }, []);
 
-  const wishlistedCourseIds = wishlistRevision >= 0 ? getWishlistCourseIds() : [];
+  const wishlistedCourseIds = wishlistRevision >= 0 ? getWishlistCourseIds(currentUserEmail) : [];
 
   const handleView = (id: string) => {
     if (status !== "authenticated") {
@@ -149,6 +152,7 @@ export default function ExplorePage() {
     setAppliedMaxPrice(maxPrice);
     setAppliedSortBy(sortBy);
     setCurrentPage(1);
+    setFiltersOpen(false);
   };
 
   const resetFilters = () => {
@@ -164,6 +168,7 @@ export default function ExplorePage() {
     setAppliedMaxPrice(200);
     setAppliedSortBy("popular");
     setCurrentPage(1);
+    setFiltersOpen(false);
   };
 
   return (
@@ -182,7 +187,7 @@ export default function ExplorePage() {
           </header>
 
           <div className="explore-layout">
-            <aside className="filter-card" aria-label="Filters">
+            <aside className={`filter-card${filtersOpen ? " open" : ""}`} aria-label="Filters">
               <div className="filter-title">Filters</div>
 
               <div className="filter-section">
@@ -286,7 +291,16 @@ export default function ExplorePage() {
             <section className="explore-results" aria-label="Course results">
               <div className="explore-topbar">
                 <div className="explore-count">Showing {filteredCourses.length} courses</div>
-                <div className="explore-sort">
+                <div className="explore-topbar-actions">
+                  <button
+                    className="explore-filter-toggle"
+                    type="button"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                    aria-expanded={filtersOpen}
+                  >
+                    {filtersOpen ? "Hide Filters" : "Show Filters"}
+                  </button>
+                  <div className="explore-sort">
                   <select
                     className="explore-sort-select"
                     value={sortBy}
@@ -302,6 +316,7 @@ export default function ExplorePage() {
                     <option value="highestPrice">Highest Price</option>
                     <option value="lowestPrice">Lowest Price</option>
                   </select>
+                </div>
                 </div>
               </div>
 
@@ -365,7 +380,7 @@ export default function ExplorePage() {
                               type="button"
                               className="course-view"
                               onClick={() => {
-                                const nextSaved = toggleWishlistCourse(c.id);
+                                const nextSaved = toggleWishlistCourse(c.id, currentUserEmail);
                                 if (nextSaved) {
                                   setCurrentPage((page) => page);
                                 }

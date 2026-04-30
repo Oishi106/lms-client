@@ -12,6 +12,7 @@ export default function CheckoutPage() {
   const params = useParams<{ id: string }>();
   const { data: session } = useSession();
   const user = session?.user;
+  const currentUserEmail = user?.email?.trim().toLowerCase() ?? "";
 
   const coursesSnapshot = useSyncExternalStore(
     subscribeManagedCourses,
@@ -84,8 +85,8 @@ export default function CheckoutPage() {
         buyerEmail: email.trim(),
         videoUrl: course.videoUrl,
         createdAt: Date.now(),
-      });
-      savePaidOrder(order);
+      }, currentUserEmail || email.trim().toLowerCase());
+      savePaidOrder(order, currentUserEmail || email.trim().toLowerCase());
       void fetch('/api/admin/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -98,9 +99,9 @@ export default function CheckoutPage() {
   return (
     <>
       <Navbar />
-      <main style={{ paddingTop: 90, minHeight: "100vh" }}>
-        <div className="container" style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 24, alignItems: "start" }}>
-          <section style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)", borderRadius: 14, padding: 24 }}>
+      <main className="checkout-page" style={{ paddingTop: 90, minHeight: "100vh" }}>
+        <div className="container checkout-grid" style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 24, alignItems: "start" }}>
+          <section className="checkout-form-card" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)", borderRadius: 14, padding: 24 }}>
             <h1 style={{ fontSize: 30, marginBottom: 18 }}>Secure Checkout</h1>
             <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
               Complete payment to enroll in this course.
@@ -123,7 +124,7 @@ export default function CheckoutPage() {
             </button>
           </section>
 
-          <aside style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)", borderRadius: 14, padding: 24, position: "sticky", top: 96 }}>
+          <aside className="checkout-summary-card" style={{ background: "var(--bg-card)", border: "1px solid var(--border-default)", borderRadius: 14, padding: 24, position: "sticky", top: 96 }}>
             <h3 style={{ marginBottom: 14 }}>Order Summary</h3>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
               <span style={{ fontSize: 28 }}>{course.icon}</span>

@@ -15,12 +15,13 @@ interface CoursePurchaseActionsProps {
 export default function CoursePurchaseActions({ courseId, price, courseTitle, videoUrl }: CoursePurchaseActionsProps) {
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
+  const currentUserEmail = session?.user?.email?.trim().toLowerCase() ?? "";
   const [purchased, setPurchased] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    setPurchased(isAdmin || hasPurchasedCourse(courseId));
-  }, [courseId, isAdmin]);
+    setPurchased(isAdmin || hasPurchasedCourse(courseId, currentUserEmail));
+  }, [courseId, currentUserEmail, isAdmin]);
 
   // পেমেন্ট হ্যান্ডলার ফাংশন
   const handleEnrollClick = async () => {

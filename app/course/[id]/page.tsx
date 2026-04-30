@@ -8,6 +8,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import CourseDetailsTabs from "@/app/components/course/CourseDetailsTabs";
 import CoursePurchaseActions from "@/app/components/course/CoursePurchaseActions";
 import CourseVideoPlayer from "@/app/components/course/CourseVideoPlayer";
+import { useSession } from "next-auth/react";
 import { getCourseHref, useCatalogCourses } from "@/app/lib/course-catalog";
 import { clearPendingCheckout, getPendingCheckout, savePaidOrder, type CourseOrder } from "@/app/lib/payments-data";
 import {
@@ -23,6 +24,8 @@ export default function CoursePage() {
   const { courses, loading, error } = useCatalogCourses();
   const confirmationRanRef = useRef(false);
   const [wishlistRevision, setWishlistRevision] = useState(0);
+  const { data: session } = useSession();
+  const currentUserEmail = session?.user?.email?.trim().toLowerCase() ?? "";
 
   const course = useMemo(
     () => courses.find((item) => item.slug === params.id || item.id === params.id),
@@ -33,7 +36,8 @@ export default function CoursePage() {
     const syncWishlist = () => setWishlistRevision((value) => value + 1);
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WISHLIST_STORAGE_KEY) syncWishlist();
+      const key = event.key || "";
+      if (key === WISHLIST_STORAGE_KEY || key.startsWith(`${WISHLIST_STORAGE_KEY}:`)) syncWishlist();
     };
 
     window.addEventListener("storage", onStorage);
@@ -45,7 +49,7 @@ export default function CoursePage() {
     };
   }, []);
 
-  const wishlistedCourseIds = useMemo(() => getWishlistCourseIds(), [wishlistRevision]);
+  const wishlistedCourseIds = useMemo(() => getWishlistCourseIds(currentUserEmail), [currentUserEmail, wishlistRevision]);
 
   useEffect(() => {
     const success = searchParams.get('success') === 'true';
@@ -55,7 +59,7 @@ export default function CoursePage() {
 
     confirmationRanRef.current = true;
 
-    const pendingCheckout = getPendingCheckout();
+    const pendingCheckout = getPendingCheckout(currentUserEmail);
     const payload = sessionId ? { sessionId } : pendingCheckout ? { order: pendingCheckout } : null;
 
     if (!payload) {
@@ -71,16 +75,16 @@ export default function CoursePage() {
       .then(async (response) => {
         const data = (await response.json().catch(() => null)) as { ok?: boolean; order?: CourseOrder } | null;
         if (response.ok && data?.order) {
-          savePaidOrder(data.order);
+          savePaidOrder(data.order, currentUserEmail);
         }
       })
       .catch(() => {
         confirmationRanRef.current = false;
       })
       .finally(() => {
-        clearPendingCheckout();
+        clearPendingCheckout(currentUserEmail);
       });
-  }, [searchParams]);
+  }, [currentUserEmail, searchParams]);
 
   if (!course && loading) {
     return (
@@ -142,7 +146,7 @@ export default function CoursePage() {
       <main className="course-details-page">
         <div className="container">
           <div
-            className="course-hero"
+            className="course-hero course-details-hero"
             style={{
               background: `linear-gradient(135deg, ${accentColor.start}, ${accentColor.end})`,
               padding: "40px 30px",
@@ -153,6 +157,7 @@ export default function CoursePage() {
             }}
           >
             <div
+              className="course-details-hero-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
@@ -161,6 +166,7 @@ export default function CoursePage() {
               }}
             >
               <div
+                className="course-details-hero-media"
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -220,7 +226,7 @@ export default function CoursePage() {
                   </span>
                 </div>
 
-                <h1 style={{ fontSize: "36px", fontWeight: "700", marginBottom: "16px", lineHeight: "1.2" }}>
+                <h1 className="course-details-title" style={{ fontSize: "36px", fontWeight: "700", marginBottom: "16px", lineHeight: "1.2" }}>
                   {course.title}
                 </h1>
 
@@ -246,7 +252,7 @@ export default function CoursePage() {
                   <span>{course.totalReviews.toLocaleString()} reviews</span>
                 </div>
 
-                <div style={{ display: "flex", gap: "20px", marginBottom: "32px", fontSize: "14px" }}>
+                <div className="course-details-kpis" style={{ display: "flex", gap: "20px", marginBottom: "32px", fontSize: "14px" }}>
                   <div>
                     <div style={{ color: "var(--text-secondary)", fontSize: "12px", marginBottom: "4px" }}>RATING</div>
                     <div style={{ fontSize: "18px", fontWeight: "600" }}>
@@ -262,7 +268,7 @@ export default function CoursePage() {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "20px" }}>
+                <div className="course-details-pricing" style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "20px" }}>
                   <span style={{ fontSize: "32px", fontWeight: "700", color: "var(--gold)" }}>
                     {course.price}
                   </span>
@@ -290,15 +296,15 @@ export default function CoursePage() {
                   videoUrl={course.videoUrl}
                 />
 
-                <div style={{ display: "flex", gap: "12px", marginTop: "16px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                <div className="course-details-feature-row" style={{ display: "flex", gap: "12px", marginTop: "16px", fontSize: "12px", color: "var(--text-secondary)" }}>
                   <span>✓ {course.duration} of video content</span>
                   <span>✓ {course.lessons} lessons & exercises</span>
                 </div>
-                <div style={{ display: "flex", gap: "12px", marginTop: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                <div className="course-details-feature-row" style={{ display: "flex", gap: "12px", marginTop: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
                   <span>✓ {course.level} level access</span>
                   <span>✓ Full lifetime access</span>
                 </div>
-                <div style={{ display: "flex", gap: "12px", marginTop: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                <div className="course-details-feature-row" style={{ display: "flex", gap: "12px", marginTop: "8px", fontSize: "12px", color: "var(--text-secondary)" }}>
                   <span>✓ Verified certificate</span>
                   <span>✓ AI learning assistant</span>
                 </div>
@@ -306,7 +312,7 @@ export default function CoursePage() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "40px", marginBottom: "60px" }}>
+          <div className="course-details-main-grid" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "40px", marginBottom: "60px" }}>
             <div>
               <CourseVideoPlayer courseId={course.id} videoUrl={course.videoUrl} previewSeconds={course.previewSeconds ?? 300} />
 
@@ -374,7 +380,7 @@ export default function CoursePage() {
                             <button
                               type="button"
                               className="course-view"
-                              onClick={() => toggleWishlistCourse(relatedCourse.id)}
+                              onClick={() => toggleWishlistCourse(relatedCourse.id, currentUserEmail)}
                               style={{ minWidth: 88 }}
                             >
                               {wishlistedCourseIds.includes(relatedCourse.id) ? "Saved ♥" : "Save ♡"}
@@ -392,6 +398,7 @@ export default function CoursePage() {
             </div>
 
             <aside
+              className="course-details-sidebar"
               style={{
                 background: "var(--bg-card)",
                 border: "1px solid var(--border-default)",
@@ -473,7 +480,7 @@ export default function CoursePage() {
                     className="btn btn-ghost"
                     style={{ width: "100%", justifyContent: "center" }}
                     type="button"
-                    onClick={() => toggleWishlistCourse(course.id)}
+                    onClick={() => toggleWishlistCourse(course.id, currentUserEmail)}
                   >
                     {wishlistedCourseIds.includes(course.id) ? "Saved for later ♥" : "Save for later ♡"}
                   </button>

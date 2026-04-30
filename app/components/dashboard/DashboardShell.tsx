@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -84,11 +84,13 @@ export default function DashboardShell() {
 
   const [activePanel, setActivePanel] = useState<Panel>("ov");
   const [profileSaved, setProfileSaved] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
 
-  const [chatMsgs, setChatMsgs] = useState<UserAdminChatMessage[]>(getInitialUserAdminChat);
+  const [chatMsgs, setChatMsgs] = useState<UserAdminChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const [userNotifications, setUserNotifications] = useState<UserNotification[]>(getUserNotifications);
+  const profilePhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [wishlistRevision, setWishlistRevision] = useState(0);
   const [reviewRevision, setReviewRevision] = useState(0);
@@ -103,16 +105,27 @@ export default function DashboardShell() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMsgs]);
 
-  useEffect(() => subscribeUserAdminChat(() => setChatMsgs(getInitialUserAdminChat())), []);
-  useEffect(() => subscribeUserNotifications(() => setUserNotifications(getUserNotifications())), []);
+  useEffect(() => {
+    setChatMsgs(getInitialUserAdminChat());
+    return subscribeUserAdminChat(() => setChatMsgs(getInitialUserAdminChat()));
+  }, []);
+
+  useEffect(() => {
+    setUserNotifications(getUserNotifications());
+    return subscribeUserNotifications(() => setUserNotifications(getUserNotifications()));
+  }, []);
 
   useEffect(() => {
     const sync = () => setRefreshToken((value) => value + 1);
     const onStorage = (event: StorageEvent) => {
+      const key = event.key || "";
       if (
-        event.key === ORDERS_STORAGE_KEY ||
-        event.key === LEARNING_PROGRESS_STORAGE_KEY ||
-        event.key === WISHLIST_STORAGE_KEY ||
+        key === ORDERS_STORAGE_KEY ||
+        key.startsWith(`${ORDERS_STORAGE_KEY}:`) ||
+        key === LEARNING_PROGRESS_STORAGE_KEY ||
+        key.startsWith(`${LEARNING_PROGRESS_STORAGE_KEY}:`) ||
+        key === WISHLIST_STORAGE_KEY ||
+        key.startsWith(`${WISHLIST_STORAGE_KEY}:`) ||
         event.key === REVIEW_STORAGE_KEY
       ) {
         sync();
@@ -135,11 +148,23 @@ export default function DashboardShell() {
   }, []);
 
   const displayName = user?.name ?? "Learner";
+  const currentUserEmail = user?.email?.trim().toLowerCase() ?? "";
+  const profilePhotoStorageKey = currentUserEmail ? `skillforge_profile_photo:${currentUserEmail}` : "";
+
+  useEffect(() => {
+    if (!profilePhotoStorageKey) {
+      setProfilePhoto(null);
+      return;
+    }
+
+    const savedPhoto = window.localStorage.getItem(profilePhotoStorageKey);
+    setProfilePhoto(savedPhoto || null);
+  }, [profilePhotoStorageKey]);
 
   const purchasedCourses = useMemo(() => {
     void refreshToken;
 
-    const orders = getPaidOrders().filter((order) => Boolean(order.buyerEmail?.trim()));
+    const orders = getPaidOrders(currentUserEmail).filter((order) => Boolean(order.buyerEmail?.trim()));
     const dedupedOrders = Array.from(new Map(orders.map((order) => [order.courseId, order])).values());
 
     return dedupedOrders
@@ -151,12 +176,12 @@ export default function DashboardShell() {
         };
       })
       .filter((item): item is { order: (typeof dedupedOrders)[number]; course: CatalogCourse } => Boolean(item.course));
-  }, [catalogCourses, refreshToken]);
+  }, [catalogCourses, currentUserEmail, refreshToken]);
 
   const unlockedVideos = useMemo(() => {
     void refreshToken;
 
-    const orders = getPaidOrders()
+    const orders = getPaidOrders(currentUserEmail)
       .filter((order) => Boolean(order.buyerEmail?.trim()))
       .sort((left, right) => right.createdAt - left.createdAt);
 
@@ -185,13 +210,13 @@ export default function DashboardShell() {
         seen.add(videoUrl);
         return true;
       });
-  }, [catalogCourses, refreshToken]);
+  }, [catalogCourses, currentUserEmail, refreshToken]);
 
   const learningProgressCourses = useMemo(
     () =>
       purchasedCourses
         .map(({ order, course }) => {
-          const progress = getCourseLearningProgress(course.id || order.courseId);
+          const progress = getCourseLearningProgress(course.id || order.courseId, currentUserEmail);
           const isComplete = progress >= 100;
           const isStarted = progress > 0;
 
@@ -240,7 +265,7 @@ export default function DashboardShell() {
   const wishlistedCourses = useMemo(() => {
     void wishlistRevision;
 
-    const wishlistMap = getStoredWishlist();
+    const wishlistMap = getStoredWishlist(currentUserEmail);
 
     return Object.entries(wishlistMap)
       .map(([courseId, addedAt]) => {
@@ -251,7 +276,7 @@ export default function DashboardShell() {
       })
       .filter((item): item is { course: CatalogCourse; addedAt: number } => Boolean(item))
       .sort((left, right) => right.addedAt - left.addedAt);
-  }, [catalogCourses, wishlistRevision]);
+  }, [catalogCourses, currentUserEmail, wishlistRevision]);
 
   useEffect(() => {
     const syncReviews = () => setReviewRevision((value) => value + 1);
@@ -271,7 +296,8 @@ export default function DashboardShell() {
   useEffect(() => {
     const syncWishlist = () => setWishlistRevision((value) => value + 1);
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WISHLIST_STORAGE_KEY) syncWishlist();
+      const key = event.key || "";
+      if (key === WISHLIST_STORAGE_KEY || key.startsWith(`${WISHLIST_STORAGE_KEY}:`)) syncWishlist();
     };
 
     window.addEventListener("storage", onStorage);
@@ -288,11 +314,31 @@ export default function DashboardShell() {
   const userName = user.name ?? "Learner";
   const userEmail = user.email ?? "";
   const userInitials = user.initials ?? "U";
-  const currentUserEmail = userEmail.trim().toLowerCase();
   void reviewRevision;
   const userReviews = currentUserEmail ? getReviewsByEmail(currentUserEmail) : [];
   const firstName = userName.split(" ")[0] ?? userName;
   const lastName = userName.split(" ").slice(1).join(" ");
+
+  const handleChangePhotoClick = () => {
+    profilePhotoInputRef.current?.click();
+  };
+
+  const handleProfilePhotoSelect = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !profilePhotoStorageKey) return;
+    if (!file.type.startsWith("image/")) return;
+    if (file.size > 2 * 1024 * 1024) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : null;
+      if (!result) return;
+      setProfilePhoto(result);
+      window.localStorage.setItem(profilePhotoStorageKey, result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   function sendChatMsg() {
     const msg = chatInput.trim();
@@ -836,7 +882,7 @@ export default function DashboardShell() {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        onClick={() => toggleWishlistCourse(course.id)}
+                        onClick={() => toggleWishlistCourse(course.id, currentUserEmail)}
                       >
                         Remove
                       </button>
@@ -942,13 +988,14 @@ export default function DashboardShell() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 24 }}>
-            <div className="d-card" style={{ textAlign: "center", height: "fit-content" }}>
-              <div
-                className="profile-ava-big"
-                style={{ background: "var(--gold-dim)", color: "var(--gold)" }}
-              >
-                {userInitials}
+          <div className="profile-grid">
+            <div className="d-card profile-card">
+              <div className="profile-ava-big" style={{ background: "var(--gold-dim)", color: "var(--gold)" }}>
+                {profilePhoto ? (
+                  <img src={profilePhoto} alt={`${userName} profile`} className="profile-photo-preview" />
+                ) : (
+                  userInitials
+                )}
               </div>
               <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 700 }}>
                 {userName}
@@ -956,9 +1003,17 @@ export default function DashboardShell() {
               <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20 }}>
                 {userEmail}
               </div>
-              <button className="btn btn-ghost" style={{ width: "100%", fontSize: 13 }} type="button">
+              <button className="btn btn-ghost" style={{ width: "100%", fontSize: 13 }} type="button" onClick={handleChangePhotoClick}>
                 Change Photo
               </button>
+              <input
+                ref={profilePhotoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: "none" }}
+                onChange={handleProfilePhotoSelect}
+              />
+              <div className="profile-photo-note">PNG/JPG/WEBP, max 2MB</div>
             </div>
 
             <div className="d-card">
