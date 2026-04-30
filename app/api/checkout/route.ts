@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-04-22.dahlia",
+  // @ts-expect-error - Stripe types for apiVersion conflict with this project's TS config
+  apiVersion: "2024-04-10",
 });
 
 export async function POST(req: Request) {
@@ -14,6 +15,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing data" }, { status: 400 });
     }
 
+    // ডাইনামিক অরিজিন ডিটেকশন (লোকালহোস্ট না ভার্সেল সেটা অটোমেটিক ধরবে)
+    const origin = req.headers.get("origin") || process.env.NEXT_PUBLIC_APP_URL || "https://lms-client-ne5a.vercel.app";
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
@@ -21,15 +25,16 @@ export async function POST(req: Request) {
           price_data: {
             currency: "usd",
             product_data: { name: courseName },
-            unit_amount: Math.round(price * 100), // দশমিক এড়াতে round ব্যবহার করুন
+            unit_amount: Math.round(price * 100),
           },
           quantity: 1,
         },
       ],
       mode: "payment",
       customer_email: typeof customerEmail === 'string' && customerEmail.trim() ? customerEmail.trim() : undefined,
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/course/${courseId}?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/course/${courseId}?canceled=true`,
+      // সাকসেস এবং ক্যানসেল ইউআরএল ফিক্স
+      success_url: `${origin}/course/${courseId}?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/course/${courseId}?canceled=true`,
       metadata: {
         courseId,
         videoUrl: typeof videoUrl === 'string' ? videoUrl.trim() : '',

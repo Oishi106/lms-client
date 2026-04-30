@@ -149,22 +149,10 @@ export default function CoursePage() {
             className="course-hero course-details-hero"
             style={{
               background: `linear-gradient(135deg, ${accentColor.start}, ${accentColor.end})`,
-              padding: "40px 30px",
-              borderRadius: "20px",
-              marginBottom: "60px",
-              marginTop: "40px",
               border: "1px solid var(--border-default)",
             }}
           >
-            <div
-              className="course-details-hero-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "40px",
-                alignItems: "center",
-              }}
-            >
+            <div className="course-details-hero-grid">
               <div
                 className="course-details-hero-media"
                 style={{
@@ -312,7 +300,7 @@ export default function CoursePage() {
             </div>
           </div>
 
-          <div className="course-details-main-grid" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "40px", marginBottom: "60px" }}>
+          <div className="course-details-main-grid">
             <div>
               <CourseVideoPlayer courseId={course.id} videoUrl={course.videoUrl} previewSeconds={course.previewSeconds ?? 300} />
 
@@ -398,15 +386,13 @@ export default function CoursePage() {
             </div>
 
             <aside
-              className="course-details-sidebar"
+              className="course-details-sidebar course-details-mobile-highlight"
               style={{
                 background: "var(--bg-card)",
                 border: "1px solid var(--border-default)",
                 borderRadius: "12px",
                 padding: "24px",
                 height: "fit-content",
-                position: "sticky",
-                top: "100px",
               }}
             >
               <h3 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "20px", color: "var(--text-primary)" }}>
