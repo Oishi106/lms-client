@@ -2,7 +2,7 @@
 
 A modern, full-stack Learning Management System (LMS) where users can explore structured courses, watch preview videos, enroll in learning programs, and track their progress through a personalized dashboard. Built with Next.js, TypeScript, and NextAuth, this platform is designed for scalability, performance, and real-world production use.
 
-## 🌐 Live Site: https://your-live-link.com/
+## 🌐 Live Site: https://lms-client-ne5a.vercel.app/
 
 ## 🖼️ Project Overview
 
