@@ -31,7 +31,6 @@ const buildFallbackApiCourses = () =>
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     instructor: {
-      
       name: (course.instructor ?? course.byline.replace(/^by\s+/i, "").split("·")[0].trim()) || "SkillForge Instructor",
       role: "Course Instructor",
       avatar: "",
@@ -54,15 +53,19 @@ const buildFallbackApiCourses = () =>
 
 export async function GET() {
   try {
-    const response = await fetch(BACKEND_URL, {
-      cache: "no-store",
-    });
+    const response = await fetch(BACKEND_URL, { cache: "no-store" });
 
     if (!response.ok) {
       return NextResponse.json({ ok: true, courses: buildFallbackApiCourses() });
     }
 
     const data = await response.json();
+
+    // Backend fail করলে (MongoDB timeout etc.) fallback দাও
+    if (!data?.ok && !data?.success) {
+      return NextResponse.json({ ok: true, courses: buildFallbackApiCourses() });
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     return NextResponse.json({ ok: true, courses: buildFallbackApiCourses() });
